@@ -1,0 +1,11 @@
+[package]
+name = "x328-proto"
+version = "0.1.0"
+authors = ["Lukas Sandström <lukas.sandstrom@chalmers.se>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ascii = "1"
+nom = "5.1"
