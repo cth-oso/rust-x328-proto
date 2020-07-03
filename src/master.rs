@@ -65,9 +65,9 @@ impl Idle {
     }
     pub fn write_parameter(self, address: Address, parameter: Parameter, value: Value) -> SendData {
         assert!(address <= 99, "invalid address value");
-        assert!(parameter <= 9999, "Invalid parameter value");
         SendData { data: vec![0] }
     }
+
     pub fn read_parameter(self, address: Address, parameter: Parameter) -> MasterEnum {
         unimplemented!()
     }

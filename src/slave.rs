@@ -123,13 +123,18 @@ impl ReadData {
                 // see above
                 Slave::ReadData(self)
             }
-            ReadParameter(parameter) => ReadParam::from_state(self.take_state(), parameter as i32),
+            ReadParameter(parameter) => ReadParam::from_state(self.take_state(), parameter),
             WriteParameter(parameter, value) => {
                 WriteParam::from_state(self.take_state(), parameter, value)
             }
             ReadAgain(offset) => {
                 if let Some(Command::Read { parameter }) = self.get_state().last_command {
-                    ReadParam::from_state(self.take_state(), parameter as i32 + offset)
+                    let state = self.take_state();
+                    if let Some(next_param) = parameter.checked_add(offset) {
+                        ReadParam::from_state(state, next_param)
+                    } else {
+                        SendData::from_state(state, vec![EOT])
+                    }
                 } else {
                     Slave::ReadData(self)
                 }
@@ -190,22 +195,16 @@ pub struct ReadParam {
 }
 
 impl ReadParam {
-    fn from_state(mut state: SlaveState, parameter: i32) -> Slave {
+    fn from_state(mut state: SlaveState, parameter: Parameter) -> Slave {
         state.last_command = None;
 
         if state.cmd_to_slave_addr() {
             // only accept commands to our address, if we have an address
-            if (0 <= parameter) && (parameter <= 9999) {
-                let parameter = parameter as Parameter;
-                state.last_command = Some(Command::Read { parameter });
-                Slave::ReadParameter(ReadParam {
-                    state: Some(state),
-                    parameter,
-                })
-            } else {
-                // Parameter out of range
-                SendData::from_state(state, vec![EOT])
-            }
+            state.last_command = Some(Command::Read { parameter });
+            Slave::ReadParameter(ReadParam {
+                state: Some(state),
+                parameter,
+            })
         } else {
             // the command was sent to another address
             ReadData::from_state(state)
@@ -213,7 +212,7 @@ impl ReadParam {
     }
 
     pub fn send_reply_ok(mut self, value: Value) -> Slave {
-        let param = format!("{:04}", self.parameter);
+        let param = self.parameter.to_string();
         assert_eq!(param.len(), 4);
         let value = format!("{:+6}", value); //FIXME: make value length adjustable
         assert_eq!(value.len(), 6);
@@ -254,11 +253,6 @@ pub struct WriteParam {
 impl WriteParam {
     fn from_state(mut state: SlaveState, parameter: Parameter, value: Value) -> Slave {
         state.last_command = None;
-
-        if parameter > 9999 {
-            // this shouldn't be possible, since we only parse 4 digits
-            panic!("Received parameter > 9999");
-        }
 
         // only accept commands to our address, if we have an address
         if state.cmd_to_slave_addr() {

@@ -14,6 +14,7 @@ use crate::slave::{Address, Parameter, Value};
 
 use AddressToken::{Invalid, Valid};
 use CommandToken::{NeedData, ReadAgain, Reset, SendNAK, WriteParameter};
+use crate::ParameterOffset;
 
 type Buf = str;
 
@@ -28,7 +29,7 @@ pub enum CommandToken {
     Reset(AddressToken),
     ReadParameter(Parameter),
     WriteParameter(Parameter, Value),
-    ReadAgain(i32),
+    ReadAgain(ParameterOffset),
     SendNAK,
     NeedData,
 }
@@ -214,6 +215,8 @@ mod tests {
     #[test]
     fn test_write() {
         let mut cmd = AsciiString::new();
+        let param = Parameter::new(1234).unwrap();
+
         macro_rules! push {
             ($x:expr) => {
                 cmd.push_str($x.as_ascii_str().unwrap());
@@ -233,14 +236,14 @@ mod tests {
         assert_eq!(write!(), incomplete!(1)); // missing bcc
 
         push!(" ");
-        assert_eq!(write!(), Ok(("", WriteParameter(1234, 123456))));
+        assert_eq!(write!(), Ok(("", WriteParameter(param, 123456))));
         let x = cmd.len() - 1;
         cmd[x] = EOT;
         assert_eq!(write!(), Ok(("", SendNAK)));
 
         cmd[x] = Space;
         push!("asd");
-        assert_eq!(write!(), Ok(("asd", WriteParameter(1234, 123456))));
+        assert_eq!(write!(), Ok(("asd", WriteParameter(param, 123456))));
     }
 
     #[test]
