@@ -12,7 +12,7 @@ use crate::buffer::Buffer;
 use crate::nom_parser::{self, AddressToken, CommandToken};
 pub use crate::{Address, Parameter, Value};
 
-pub type OptionalAddress = Option<u8>;
+pub type OptionalAddress = Option<Address>;
 
 pub(crate) fn bcc(data: &[u8]) -> u8 {
     let mut checksum: u8 = 0;
@@ -71,7 +71,7 @@ pub struct ReadData {
 }
 
 impl ReadData {
-    fn new(address: Option<u8>) -> Slave {
+    fn new(address: Option<Address>) -> Slave {
         Slave::ReadData(ReadData {
             state: Some(SlaveState {
                 slave_address: address,
@@ -293,6 +293,7 @@ impl WriteParam {
 #[cfg(test)]
 mod tests {
     use crate::slave::{Parameter, Slave, Value};
+    use crate::Address;
     use std::cmp::min;
     use std::collections::HashMap;
 
@@ -334,7 +335,7 @@ mod tests {
         let mut serial = SerialInterface::new(data_in);
         let mut registers: HashMap<Parameter, Value> = HashMap::new();
 
-        let mut slave_proto = Slave::new(Some(10));
+        let mut slave_proto = Slave::new(Address::new(10));
 
         'main: loop {
             slave_proto = match slave_proto {

@@ -8,8 +8,58 @@ pub mod master;
 mod nom_parser;
 pub mod slave;
 
-pub type Address = u8;
 pub type Value = i32;
+
+#[derive(PartialEq, Eq, Debug, Copy, Clone, Hash)]
+pub struct Address(u8);
+
+impl Address {
+    pub fn new(address: u8) -> Option<Address> {
+        if address <= 99 {
+            Some(Address(address))
+        } else {
+            None
+        }
+    }
+
+    pub fn new_unchecked(address: u8) -> Address {
+        Address::new(address).expect("Address out of range")
+    }
+}
+
+impl PartialEq<usize> for Address {
+    fn eq(&self, other: &usize) -> bool {
+        self.0 as usize == *other
+    }
+}
+
+impl Into<usize> for Address {
+    fn into(self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl FromStr for Address {
+    type Err = X328Error;
+
+    /// This is meant to be used for parsing the on-wire format
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.len() != 2 {
+            Err(X328Error::InvalidAddress)
+        } else {
+            Address::new(s.parse().map_err(|e| X328Error::InvalidAddress)?)
+                .ok_or(X328Error::InvalidAddress)
+        }
+    }
+}
+
+impl ToString for Address {
+    fn to_string(&self) -> String {
+        let addr_str = format!("{:02}", self.0);
+        let x = addr_str.as_bytes();
+        String::from_utf8(vec![x[0], x[0], x[1], x[1]]).expect("Failed to construct address string")
+    }
+}
 
 #[derive(PartialEq, Eq, Debug, Copy, Clone, Hash)]
 pub struct Parameter(i16);
@@ -31,7 +81,7 @@ impl Parameter {
     }
 
     pub(crate) fn checked_add(&self, offset: ParameterOffset) -> Option<Parameter> {
-            Parameter::new(self.0.checked_add(offset)?)
+        Parameter::new(self.0.checked_add(offset)?)
     }
 }
 
@@ -96,7 +146,24 @@ impl From<std::io::Error> for X328Error {
 
 #[cfg(test)]
 mod tests {
-    use crate::Parameter;
+    use crate::{Address, Parameter};
+
+    #[test]
+    fn test_address() {
+        let a87 = Address::new(87).unwrap();
+        assert_eq!(a87, 87);
+
+        let str = a87.to_string();
+        assert_eq!(str, "8877");
+
+        let a05 = Address::new_unchecked(5);
+        assert_eq!(a05.to_string(), "0055");
+
+        assert_eq!("05".parse::<Address>().unwrap(), Address(5));
+        assert_eq!("13".parse::<Address>().unwrap(), 13);
+        assert!("1".parse::<Address>().is_err());
+        assert!("100".parse::<Address>().is_err());
+    }
 
     #[test]
     fn test_parameter() {

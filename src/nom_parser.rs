@@ -12,9 +12,9 @@ use nom::combinator::{map, map_res, peek, recognize, value};
 
 use crate::slave::{Address, Parameter, Value};
 
+use crate::ParameterOffset;
 use AddressToken::{Invalid, Valid};
 use CommandToken::{NeedData, ReadAgain, Reset, SendNAK, WriteParameter};
-use crate::ParameterOffset;
 
 type Buf = str;
 
@@ -207,7 +207,10 @@ mod tests {
 
     #[test]
     fn test_address() {
-        assert_eq!(address::<VerboseError<&Buf>>("11223"), Ok(("3", Valid(12))));
+        assert_eq!(
+            address::<VerboseError<&Buf>>("11223"),
+            Ok(("3", Valid(Address::new_unchecked(12))))
+        );
         assert_eq!(address::<VerboseError<&Buf>>("aa22"), Ok(("", Invalid)));
         assert_eq!(address::<VerboseError<&Buf>>("122"), incomplete!(4));
     }
@@ -265,6 +268,9 @@ mod tests {
         cmd.push(EOT);
         assert_eq!(rue!(), incomplete!(4));
         push!("1122123");
-        assert_eq!(rue!(), Ok(("123", Reset(Valid(12)))));
+        assert_eq!(
+            rue!(),
+            Ok(("123", Reset(Valid(Address::new_unchecked(12)))))
+        );
     }
 }

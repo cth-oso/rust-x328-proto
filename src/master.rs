@@ -56,15 +56,7 @@ impl MasterEnum {
 }
 
 impl Idle {
-    fn check_address(self, address: Address) -> Result<Idle, X328Error> {
-        if address <= 99 {
-            Ok(self)
-        } else {
-            Err(X328Error::InvalidAddress)
-        }
-    }
     pub fn write_parameter(self, address: Address, parameter: Parameter, value: Value) -> SendData {
-        assert!(address <= 99, "invalid address value");
         SendData { data: vec![0] }
     }
 
