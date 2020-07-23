@@ -296,6 +296,7 @@ mod tests {
     use crate::Address;
     use std::cmp::min;
     use std::collections::HashMap;
+    use std::io::Read;
 
     struct SerialInterface {
         rx: Vec<u8>,
@@ -312,20 +313,19 @@ mod tests {
             }
         }
 
-        // Will return up to len bytes, until the rx buffer is exhausted
-        fn read(&mut self, len: usize) -> Option<&[u8]> {
-            let pos = self.rx_pos;
-            let new_pos = min(pos + len, self.rx.len());
-            if pos == new_pos {
-                None
-            } else {
-                self.rx_pos = new_pos;
-                Some(&self.rx[pos..new_pos])
-            }
-        }
         // Append bytes to the tx buffer
         fn write(&mut self, bytes: &[u8]) {
             self.tx.extend_from_slice(bytes);
+        }
+    }
+
+    impl std::io::Read for SerialInterface {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let pos = self.rx_pos;
+            let new_pos = min(pos + buf.len(), self.rx.len());
+            let len = new_pos - pos;
+            buf[..len].copy_from_slice(&self.rx[pos..new_pos]);
+            Ok(len)
         }
     }
 
@@ -340,8 +340,12 @@ mod tests {
         'main: loop {
             slave_proto = match slave_proto {
                 Slave::ReadData(recv) => {
-                    if let Some(data) = serial.read(1) {
-                        recv.receive_data(data)
+                    let mut buf = [0; 1];
+                    if let Ok(len) = serial.read(&mut buf) {
+                        if len == 0 {
+                            break 'main;
+                        }
+                        recv.receive_data(&buf[..len])
                     } else {
                         break 'main;
                     }
