@@ -39,14 +39,14 @@ pub enum Slave {
 }
 
 impl Slave {
-    pub fn new(address: OptionalAddress) -> Slave {
+    pub fn new(address: Address) -> Slave {
         ReadData::new(address)
     }
 }
 
 #[derive(Debug)]
 struct SlaveState {
-    slave_address: OptionalAddress,
+    slave_address: Address,
     last_address: OptionalAddress,
     last_command: Option<Command>,
 }
@@ -60,7 +60,7 @@ impl SlaveState {
     }
 
     fn cmd_to_slave_addr(&self) -> bool {
-        self.slave_address == self.last_address || self.slave_address.is_none()
+        Some(self.slave_address) == self.last_address
         // NOTE: This doesn't accept the broadcast address 0
     }
 }
@@ -71,7 +71,7 @@ pub struct ReadData {
 }
 
 impl ReadData {
-    fn new(address: Option<Address>) -> Slave {
+    fn new(address: Address) -> Slave {
         Slave::ReadData(ReadData {
             state: Some(SlaveState {
                 slave_address: address,
@@ -335,7 +335,7 @@ mod tests {
         let mut serial = SerialInterface::new(data_in);
         let mut registers: HashMap<Parameter, Value> = HashMap::new();
 
-        let mut slave_proto = Slave::new(Address::new(10));
+        let mut slave_proto = Slave::new(Address::new(10).unwrap());
 
         'main: loop {
             slave_proto = match slave_proto {
