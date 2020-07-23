@@ -31,6 +31,7 @@ pub enum Command {
     Write,
 }
 
+#[derive(Debug)]
 pub enum Slave {
     ReadData(ReadData),
     SendData(SendData),
@@ -44,14 +45,16 @@ impl Slave {
     }
 }
 
+type SlaveState = Box<SlaveStateStruct>;
+
 #[derive(Debug)]
-struct SlaveState {
+struct SlaveStateStruct {
     slave_address: Address,
     last_address: OptionalAddress,
     last_command: Option<Command>,
 }
 
-impl SlaveState {
+impl SlaveStateStruct {
     fn set_last_command(&mut self, cmd: Command) {
         self.last_command = Some(cmd);
     }
@@ -65,15 +68,16 @@ impl SlaveState {
     }
 }
 
+#[derive(Debug)]
 pub struct ReadData {
-    state: Option<SlaveState>,
+    state: SlaveState,
     input_buffer: Buffer,
 }
 
 impl ReadData {
     fn new(address: Address) -> Slave {
         Slave::ReadData(ReadData {
-            state: Some(SlaveState {
+            state: Box::new(SlaveStateStruct {
                 slave_address: address,
                 last_address: None,
                 last_command: None,
@@ -84,7 +88,7 @@ impl ReadData {
 
     fn from_state(state: SlaveState) -> Slave {
         Slave::ReadData(ReadData {
-            state: Some(state),
+            state,
             input_buffer: Buffer::new(),
         })
     }
@@ -107,11 +111,11 @@ impl ReadData {
 
         // Reset is the only token we accept with data remaining in the buffer
         if let Reset(address) = &token {
-            self.mut_state().last_address = match address {
+            self.state.last_address = match address {
                 AddressToken::Valid(address) => Some(*address),
                 AddressToken::Invalid => None,
             };
-            self.mut_state().clear_last_command();
+            self.state.clear_last_command();
         }
 
         if self.input_buffer.len() > 0 {
@@ -123,17 +127,16 @@ impl ReadData {
                 // see above
                 Slave::ReadData(self)
             }
-            ReadParameter(parameter) => ReadParam::from_state(self.take_state(), parameter),
+            ReadParameter(parameter) => ReadParam::from_state(self.state, parameter),
             WriteParameter(parameter, value) => {
-                WriteParam::from_state(self.take_state(), parameter, value)
+                WriteParam::from_state(self.state, parameter, value)
             }
             ReadAgain(offset) => {
-                if let Some(Command::Read { parameter }) = self.get_state().last_command {
-                    let state = self.take_state();
+                if let Some(Command::Read { parameter }) = self.state.last_command {
                     if let Some(next_param) = parameter.checked_add(offset) {
-                        ReadParam::from_state(state, next_param)
+                        ReadParam::from_state(self.state, next_param)
                     } else {
-                        SendData::from_state(state, vec![EOT])
+                        SendData::from_state(self.state, vec![EOT])
                     }
                 } else {
                     Slave::ReadData(self)
@@ -144,37 +147,25 @@ impl ReadData {
         }
     }
 
-    fn send_nak(&mut self) -> Slave {
-        SendData::from_state(self.take_state(), vec![NAK])
-    }
-
-    fn get_state(&self) -> &SlaveState {
-        self.state.as_ref().unwrap()
-    }
-    fn mut_state(&mut self) -> &mut SlaveState {
-        self.state.as_mut().unwrap()
-    }
-    fn take_state(&mut self) -> SlaveState {
-        self.state.take().unwrap()
+    fn send_nak(self) -> Slave {
+        SendData::from_state(self.state, vec![NAK])
     }
 }
 
+#[derive(Debug)]
 pub struct SendData {
-    state: Option<SlaveState>,
+    state: SlaveState,
     data: Vec<u8>,
 }
 
 impl SendData {
     fn from_state(state: SlaveState, data: Vec<u8>) -> Slave {
-        Slave::SendData(SendData {
-            state: Some(state),
-            data,
-        })
+        Slave::SendData(SendData { state, data })
     }
 
     fn nak_from_state(state: SlaveState) -> Slave {
         Slave::SendData(SendData {
-            state: Some(state),
+            state,
             data: vec![NAK],
         })
     }
@@ -183,14 +174,14 @@ impl SendData {
         self.data.split_off(0)
     }
 
-    pub fn data_sent(mut self) -> Slave {
-        ReadData::from_state(self.state.take().unwrap())
+    pub fn data_sent(self) -> Slave {
+        ReadData::from_state(self.state)
     }
 }
 
 #[derive(Debug)]
 pub struct ReadParam {
-    state: Option<SlaveState>,
+    state: SlaveState,
     parameter: Parameter,
 }
 
@@ -201,17 +192,14 @@ impl ReadParam {
         if state.cmd_to_slave_addr() {
             // only accept commands to our address, if we have an address
             state.last_command = Some(Command::Read { parameter });
-            Slave::ReadParameter(ReadParam {
-                state: Some(state),
-                parameter,
-            })
+            Slave::ReadParameter(ReadParam { state, parameter })
         } else {
             // the command was sent to another address
             ReadData::from_state(state)
         }
     }
 
-    pub fn send_reply_ok(mut self, value: Value) -> Slave {
+    pub fn send_reply_ok(self, value: Value) -> Slave {
         let param = self.parameter.to_string();
         assert_eq!(param.len(), 4);
         let value = format!("{:+6}", value); //FIXME: make value length adjustable
@@ -224,28 +212,24 @@ impl ReadParam {
         data.push(ETX);
         data.push(bcc(&data[1..]));
 
-        SendData::from_state(self.take_state(), data)
+        SendData::from_state(self.state, data)
     }
 
-    pub fn send_invalid_parameter(mut self) -> Slave {
-        SendData::from_state(self.take_state(), vec![EOT])
+    pub fn send_invalid_parameter(self) -> Slave {
+        SendData::from_state(self.state, vec![EOT])
     }
 
     pub fn get_address(&self) -> Address {
-        self.state.as_ref().unwrap().last_address.unwrap()
+        self.state.last_address.unwrap()
     }
     pub fn get_parameter(&self) -> Parameter {
         self.parameter
-    }
-
-    fn take_state(&mut self) -> SlaveState {
-        self.state.take().unwrap()
     }
 }
 
 #[derive(Debug)]
 pub struct WriteParam {
-    state: Option<SlaveState>,
+    state: SlaveState,
     parameter: Parameter,
     value: Value,
 }
@@ -258,7 +242,7 @@ impl WriteParam {
         if state.cmd_to_slave_addr() {
             state.set_last_command(Command::Write);
             Slave::WriteParameter(WriteParam {
-                state: Some(state),
+                state,
                 parameter,
                 value,
             })
@@ -268,7 +252,7 @@ impl WriteParam {
     }
 
     pub fn get_address(&self) -> Address {
-        self.state.as_ref().unwrap().last_address.unwrap()
+        self.state.last_address.unwrap()
     }
     pub fn get_parameter(&self) -> Parameter {
         self.parameter
@@ -277,16 +261,12 @@ impl WriteParam {
         self.value
     }
 
-    fn take_state(&mut self) -> SlaveState {
-        self.state.take().unwrap()
+    pub fn write_ok(self) -> Slave {
+        SendData::from_state(self.state, vec![ACK])
     }
 
-    pub fn write_ok(mut self) -> Slave {
-        SendData::from_state(self.take_state(), vec![ACK])
-    }
-
-    pub fn write_error(mut self) -> Slave {
-        SendData::nak_from_state(self.take_state())
+    pub fn write_error(self) -> Slave {
+        SendData::nak_from_state(self.state)
     }
 }
 
