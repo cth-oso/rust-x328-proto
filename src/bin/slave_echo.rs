@@ -22,7 +22,7 @@ fn slave_main_loop() -> Result<(), Box<dyn Error>> {
             }
 
             Slave::SendData(mut send) => {
-                io::stdout().write(send.send_data().as_ref())?;
+                io::stdout().write_all(send.send_data().as_ref())?;
                 send.data_sent()
             }
 
