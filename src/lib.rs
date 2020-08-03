@@ -47,7 +47,7 @@ impl FromStr for Address {
         if s.len() != 2 {
             Err(X328Error::InvalidAddress)
         } else {
-            Address::new(s.parse().map_err(|e| X328Error::InvalidAddress)?)
+            Address::new(s.parse().map_err(|_e| X328Error::InvalidAddress)?)
                 .ok_or(X328Error::InvalidAddress)
         }
     }
@@ -105,7 +105,7 @@ impl FromStr for Parameter {
         if s.len() != 4 {
             Err(X328Error::InvalidParameter)
         } else {
-            Parameter::new(s.parse().map_err(|e| X328Error::InvalidParameter)?)
+            Parameter::new(s.parse().map_err(|_e| X328Error::InvalidParameter)?)
                 .ok_or(X328Error::InvalidParameter)
         }
     }
