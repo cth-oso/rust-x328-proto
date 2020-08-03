@@ -14,7 +14,7 @@ use crate::slave::{Address, Parameter, Value};
 
 use crate::ParameterOffset;
 use AddressToken::{Invalid, Valid};
-use CommandToken::{NeedData, ReadAgain, Reset, SendNAK, WriteParameter};
+use CommandToken::{ReadAgain, Reset, SendNAK, WriteParameter};
 
 type Buf = str;
 
@@ -34,7 +34,7 @@ pub enum CommandToken {
     NeedData,
 }
 
-#[derive(Clone)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum ResponseToken {
     WriteOk,
     WriteFailed,
@@ -42,6 +42,7 @@ pub enum ResponseToken {
     ReadOK { parameter: Parameter, value: Value },
     ReadFailed,
     NeedData,
+    InvalidDataReceived,
 }
 
 pub fn parse_command(buf: &Buf) -> (usize, CommandToken) {
@@ -56,7 +57,7 @@ pub fn parse_command(buf: &Buf) -> (usize, CommandToken) {
     ))(buf)
     {
         Ok((remaining, token)) => (buf.len() - remaining.len(), token),
-        Err(Incomplete(_)) => (0, NeedData),
+        Err(Incomplete(_)) => (0, CommandToken::NeedData),
         Err(_) => panic!("Wut??"),
     }
 }
@@ -77,12 +78,14 @@ pub fn parse_reponse(buf: &Buf) -> (usize, ResponseToken) {
 
 fn read_response(buf: &Buf) -> IResult<&Buf, ResponseToken> {
     match param_data_etx(buf) {
-        Ok((buf, (parameter, value, true))) => {
+        Ok((buf, (parameter, value, true /* BCC ok */))) => {
             Ok((buf, ResponseToken::ReadOK { parameter, value }))
         }
-        Ok((buf, (_parameter, _value, false))) => Ok((buf, ResponseToken::ReadFailed)),
+        Ok((buf, (_parameter, _value, false /* BCC failed */))) => {
+            Ok((buf, ResponseToken::InvalidDataReceived))
+        }
         Err(Incomplete(x)) => Err(Incomplete(x)),
-        Err(_) => Ok((buf, ResponseToken::ReadFailed)),
+        Err(_) => Ok((buf, ResponseToken::InvalidDataReceived)),
     }
 }
 fn read_until_eot(buf: &Buf) -> IResult<&Buf, CommandToken> {
@@ -142,13 +145,13 @@ fn received_bcc<'a, E: ParseError<&'a Buf>>(buf: &'a Buf) -> IResult<&'a Buf, u8
     map(take(1usize), |u: &Buf| u.as_bytes()[0])(buf)
 }
 
+/// The return tuple is (Parameter, Value, BCC check ok)
 fn param_data_etx(buf: &Buf) -> IResult<&Buf, (Parameter, Value, bool)> {
-    let (buf, _stx) = ascii_char(SOX)(buf)?;
+    let (buf, _stx) = ascii_char(SOX)(buf)?; // SOX == STX
 
     let (buf, ((param, value), bcc_slice)) = pair(peek(bcc_fields), recognize(bcc_fields))(buf)?;
     let (buf, recv_bcc) = received_bcc(buf)?;
     let calc_bcc = bcc(bcc_slice);
-    // println!("Write command checksum mismatch expected {}, got {}", calc_bcc, recv_bcc);
     Ok((buf, (param, value, calc_bcc == recv_bcc)))
 }
 
