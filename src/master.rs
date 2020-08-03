@@ -10,12 +10,23 @@ pub struct MasterState {
     slaves: [SlaveState; 100],
 }
 
+impl Debug for MasterState {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "MasterState {{ last_address: {:?}, slaves: [..]}}",
+            self.last_address
+        )
+    }
+}
+
 #[derive(Copy, Clone)]
 pub struct SlaveState {
     can_read_again: bool,
     can_write_again: bool,
 }
 
+#[derive(Debug)]
 pub struct Master {
     state: StateT,
 }
@@ -64,6 +75,7 @@ impl From<StateT> for Master {
     }
 }
 
+#[derive(Debug)]
 pub struct SendData<R: Receiver<R>> {
     state: StateT,
     data: Vec<u8>,
@@ -80,6 +92,7 @@ impl<R: Receiver<R>> SendData<R> {
     }
 }
 
+#[derive(Debug)]
 pub enum ReceiverResult<R, T> {
     NeedData(R),
     Done(Master, T),
@@ -91,12 +104,14 @@ pub trait Receiver<R: Receiver<R>> {
     fn receive_data(self, data: &[u8]) -> ReceiverResult<R, Self::Response>;
 }
 
+#[derive(Debug)]
 pub enum WriteResponse {
     ACK,
     NAK,
     TransmissionError,
 }
 
+#[derive(Debug)]
 pub struct ReceiveWriteResponse {
     state: StateT,
     buffer: Buffer,
@@ -127,12 +142,14 @@ impl Receiver<ReceiveWriteResponse> for ReceiveWriteResponse {
     }
 }
 
+#[derive(Debug)]
 pub enum ReadResponse {
     InvalidParameter,
     Ok(Value),
     TransmissionError,
 }
 
+#[derive(Debug)]
 pub struct ReceiveReadResponse {
     state: StateT,
     buffer: Buffer,
@@ -170,6 +187,7 @@ mod tests {
     use crate::slave::tests::SerialInterface;
     use std::collections::HashMap;
 
+    #[derive(Debug)]
     struct StreamMaster<'a, IO>
 // where IO: std::io::Read + std::io::Write
     {
