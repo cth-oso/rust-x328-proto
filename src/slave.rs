@@ -109,7 +109,7 @@ impl ReadData {
             return Slave::ReadData(self);
         }
 
-        // Reset is the only token we accept with data remaining in the buffer
+        // Reset is the only token we process with data remaining in the buffer
         if let Reset(address) = &token {
             self.state.last_address = match address {
                 AddressToken::Valid(address) => Some(*address),
@@ -118,7 +118,8 @@ impl ReadData {
             self.state.clear_last_command();
         }
 
-        if self.input_buffer.len() > 0 {
+        // Skip this token and get another if we're not at the end of the buffer
+        if self.input_buffer.len() > 0 && consumed > 0 {
             return self.parse_buffer();
         }
 
