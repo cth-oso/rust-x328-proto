@@ -271,21 +271,21 @@ impl WriteParam {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use crate::slave::{Parameter, Slave, Value};
     use crate::Address;
     use std::cmp::min;
     use std::collections::HashMap;
     use std::io::Read;
 
-    struct SerialInterface {
+    pub(crate) struct SerialInterface {
         rx: Vec<u8>,
         rx_pos: usize,
         tx: Vec<u8>,
     }
 
     impl SerialInterface {
-        fn new(tx: &[u8]) -> SerialInterface {
+        pub fn new(tx: &[u8]) -> SerialInterface {
             SerialInterface {
                 tx: tx.to_vec(),
                 rx: Vec::new(),
@@ -294,7 +294,7 @@ mod tests {
         }
 
         // Append bytes to the tx buffer
-        fn write(&mut self, bytes: &[u8]) {
+        pub fn write(&mut self, bytes: &[u8]) {
             self.tx.extend_from_slice(bytes);
         }
     }
