@@ -276,7 +276,7 @@ pub(crate) mod tests {
     use crate::Address;
     use std::cmp::min;
     use std::collections::HashMap;
-    use std::io::Read;
+    use std::io::{Read, Write};
 
     pub(crate) struct SerialInterface {
         rx: Vec<u8>,
@@ -285,27 +285,32 @@ pub(crate) mod tests {
     }
 
     impl SerialInterface {
-        pub fn new(tx: &[u8]) -> SerialInterface {
+        pub fn new(rx: &[u8]) -> SerialInterface {
             SerialInterface {
-                tx: tx.to_vec(),
-                rx: Vec::new(),
+                rx: rx.to_vec(),
+                tx: Vec::new(),
                 rx_pos: 0,
             }
-        }
-
-        // Append bytes to the tx buffer
-        pub fn write(&mut self, bytes: &[u8]) {
-            self.tx.extend_from_slice(bytes);
         }
     }
 
     impl std::io::Read for SerialInterface {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            let pos = self.rx_pos;
-            let new_pos = min(pos + buf.len(), self.rx.len());
-            let len = new_pos - pos;
-            buf[..len].copy_from_slice(&self.rx[pos..new_pos]);
+            let old_pos = self.rx_pos;
+            self.rx_pos = min(old_pos + buf.len(), self.rx.len());
+            let len = self.rx_pos - old_pos;
+            buf[..len].copy_from_slice(&self.rx[old_pos..self.rx_pos]);
             Ok(len)
+        }
+    }
+
+    impl std::io::Write for SerialInterface {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.tx.write(buf)
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
         }
     }
 
@@ -332,7 +337,7 @@ pub(crate) mod tests {
                 }
 
                 Slave::SendData(mut send) => {
-                    serial.write(send.send_data().as_ref());
+                    serial.write_all(send.send_data().as_ref()).unwrap();
                     send.data_sent()
                 }
 
