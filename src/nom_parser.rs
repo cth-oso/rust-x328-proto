@@ -40,7 +40,6 @@ pub enum ResponseToken {
     WriteFailed,
     InvalidParameter,
     ReadOK { parameter: Parameter, value: Value },
-    ReadFailed,
     NeedData,
     InvalidDataReceived,
 }

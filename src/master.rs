@@ -231,31 +231,26 @@ impl Receiver<ReceiveReadResponse> for ReceiveReadResponse {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::slave::tests::{SerialIOPlane, SerialInterface};
-    use crate::X328Error::IOError;
-    use ascii::AsciiChar::{ACK, NAK};
-    use std::collections::HashMap;
-    use std::convert::TryInto;
+pub mod io {
+    use crate::master::{ReadResponse, Receiver, ReceiverResult, SendData, WriteResponse};
+    use crate::{Address, Parameter, Value, X328Error};
 
     #[derive(Debug)]
-    pub struct StreamMaster<IO>
+    pub struct Master<IO>
     where
         IO: std::io::Read + std::io::Write,
     {
-        idle_state: Option<Master>,
+        idle_state: Option<super::Master>,
         stream: IO,
     }
 
-    impl<IO> StreamMaster<IO>
+    impl<IO> Master<IO>
     where
         IO: std::io::Read + std::io::Write,
     {
-        pub fn new(io: IO) -> StreamMaster<IO> {
-            StreamMaster {
-                idle_state: Master::new().into(),
+        pub fn new(io: IO) -> Master<IO> {
+            Master {
+                idle_state: super::Master::new().into(),
                 stream: io,
             }
         }
@@ -309,33 +304,16 @@ mod tests {
             }
         }
 
-        fn take_idle(&mut self) -> Master {
+        fn take_idle(&mut self) -> super::Master {
             self.idle_state.take().unwrap()
         }
-        fn get_idle(&self) -> &Master {
-            self.idle_state.as_ref().unwrap()
-        }
     }
+}
 
-    #[test]
-    fn master_main_loop() {
-        let data_in = [SOX.as_byte(), ACK.as_byte()];
-        let serial_sim = SerialInterface::new(&data_in);
-        let mut serial = SerialIOPlane::new(&serial_sim);
-        // let mut registers: HashMap<Parameter, Value> = HashMap::new();
-
-        let mut master = StreamMaster::new(&mut serial);
-        let addr10 = Address::new_unchecked(10);
-        let param20 = Parameter::new_unchecked(20);
-        let x = master.write_parameter(addr10, param20, 3);
-        assert_eq!(x.unwrap(), WriteResponse::TransmissionError);
-        serial_sim.borrow_mut().trigger_write_error();
-        let x = master.write_parameter(addr10, param20, 3);
-        assert_eq!(x.unwrap_err(), IOError);
-        let x = master.write_parameter(addr10, param20, 3);
-        println!("Write success: {:?}", x);
-        assert_eq!(x.unwrap(), WriteResponse::WriteOk);
-    }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::convert::TryInto;
 
     #[test]
     fn write_parameter() -> Result<(), X328Error> {
