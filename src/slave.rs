@@ -41,7 +41,7 @@ pub enum Slave {
 
 impl Slave {
     pub fn new(address: Address) -> Slave {
-        ReadData::new(address)
+        ReadData::create(address)
     }
 }
 
@@ -75,7 +75,7 @@ pub struct ReadData {
 }
 
 impl ReadData {
-    fn new(address: Address) -> Slave {
+    fn create(address: Address) -> Slave {
         Slave::ReadData(ReadData {
             state: Box::new(SlaveStateStruct {
                 slave_address: address,
@@ -274,40 +274,68 @@ impl WriteParam {
 #[cfg(test)]
 pub(crate) mod tests {
     use crate::slave::{Parameter, Slave, Value};
-    use crate::Address;
+    use crate::{Address, X328Error};
+    use std::cell::RefCell;
     use std::cmp::min;
     use std::collections::HashMap;
-    use std::io::{Read, Write};
+    use std::io::{Error, ErrorKind, Read, Write};
+    use std::rc::Rc;
 
     pub(crate) struct SerialInterface {
         rx: Vec<u8>,
         rx_pos: usize,
         tx: Vec<u8>,
+        do_io_error: bool,
+    }
+
+    pub(crate) struct SerialIOPlane(Rc<RefCell<SerialInterface>>);
+
+    impl SerialIOPlane {
+        pub fn new(serial_if: &Rc<RefCell<SerialInterface>>) -> SerialIOPlane {
+            SerialIOPlane(serial_if.clone())
+        }
     }
 
     impl SerialInterface {
-        pub fn new(rx: &[u8]) -> SerialInterface {
-            SerialInterface {
+        pub fn new(rx: &[u8]) -> Rc<RefCell<SerialInterface>> {
+            Rc::new(RefCell::new(SerialInterface {
                 rx: rx.to_vec(),
                 tx: Vec::new(),
                 rx_pos: 0,
+                do_io_error: false,
+            }))
+        }
+
+        pub fn trigger_io_error(&mut self) {
+            self.do_io_error = true;
+        }
+    }
+
+    impl std::io::Read for SerialIOPlane {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            let mut inner = self.0.borrow_mut();
+            if inner.do_io_error {
+                inner.do_io_error = false;
+                Err(Error::new(ErrorKind::PermissionDenied, X328Error::IOError))
+            } else {
+                let old_pos = inner.rx_pos;
+                inner.rx_pos = min(old_pos + buf.len(), inner.rx.len());
+                let len = inner.rx_pos - old_pos;
+                buf[..len].copy_from_slice(&inner.rx[old_pos..inner.rx_pos]);
+                Ok(len)
             }
         }
     }
 
-    impl std::io::Read for SerialInterface {
-        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-            let old_pos = self.rx_pos;
-            self.rx_pos = min(old_pos + buf.len(), self.rx.len());
-            let len = self.rx_pos - old_pos;
-            buf[..len].copy_from_slice(&self.rx[old_pos..self.rx_pos]);
-            Ok(len)
-        }
-    }
-
-    impl std::io::Write for SerialInterface {
+    impl std::io::Write for SerialIOPlane {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.tx.write(buf)
+            let mut inner = self.0.borrow_mut();
+            if inner.do_io_error {
+                inner.do_io_error = false;
+                Err(Error::new(ErrorKind::PermissionDenied, X328Error::IOError))
+            } else {
+                inner.tx.write(buf)
+            }
         }
 
         fn flush(&mut self) -> std::io::Result<()> {
@@ -318,7 +346,8 @@ pub(crate) mod tests {
     #[test]
     fn slave_main_loop() {
         let data_in = b"asd";
-        let mut serial = SerialInterface::new(data_in);
+        let serial_sim = SerialInterface::new(data_in);
+        let mut serial = SerialIOPlane::new(&serial_sim);
         let mut registers: HashMap<Parameter, Value> = HashMap::new();
 
         let mut slave_proto = Slave::new(Address::new(10).unwrap());

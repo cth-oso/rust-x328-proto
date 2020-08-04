@@ -228,7 +228,8 @@ impl Receiver<ReceiveReadResponse> for ReceiveReadResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::slave::tests::SerialInterface;
+    use crate::slave::tests::{SerialIOPlane, SerialInterface};
+    use ascii::AsciiChar::{ACK, NAK};
     use std::collections::HashMap;
 
     #[derive(Debug)]
@@ -306,14 +307,21 @@ mod tests {
 
     #[test]
     fn master_main_loop() {
-        let data_in = b"asd";
-        let mut serial = SerialInterface::new(data_in);
+        let data_in = [SOX.as_byte(), NAK.as_byte()];
+        let serial_sim = SerialInterface::new(&data_in);
+        let mut serial = SerialIOPlane::new(&serial_sim);
         // let mut registers: HashMap<Parameter, Value> = HashMap::new();
 
         let mut master = StreamMaster::new(&mut serial);
-        let addr10: Address = Address::new_unchecked(10);
-        let x = master.write_parameter(addr10, Parameter::new_unchecked(20), 3);
+        let addr10 = Address::new_unchecked(10);
+        let param20 = Parameter::new_unchecked(20);
+        let x = master.write_parameter(addr10, param20, 3);
         let x = x.unwrap();
+        println!("{:?}", x);
+        serial_sim.borrow_mut().trigger_io_error();
+        let x = master.write_parameter(addr10, param20, 3);
+        println!("{:?}", x);
+        let x = master.write_parameter(addr10, param20, 3);
         println!("{:?}", x);
     }
 }

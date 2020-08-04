@@ -123,6 +123,7 @@ pub enum X328Error {
     InvalidParameter,
     IOError,
     OtherError,
+    InvalidDataReceived,
 }
 
 impl StdError for X328Error {}
