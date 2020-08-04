@@ -58,9 +58,9 @@ impl Master {
     ) -> SendData<ReceiveWriteResponse> {
         let mut data = Vec::with_capacity(20);
         data.push(EOT.as_byte());
-        data.extend_from_slice(address.to_string().as_bytes());
+        data.extend_from_slice(&address.to_bytes());
         data.push(SOX.as_byte());
-        data.extend_from_slice(parameter.to_string().as_bytes());
+        data.extend_from_slice(&parameter.to_bytes());
         data.extend_from_slice(format!("{:05}", value).as_bytes());
         data.push(ETX.as_byte());
         data.push(bcc(&data[6..]));
@@ -74,8 +74,8 @@ impl Master {
     ) -> SendData<ReceiveReadResponse> {
         let mut data = Vec::with_capacity(10);
         data.push(EOT.as_byte());
-        data.extend_from_slice(address.to_string().as_bytes());
-        data.extend_from_slice(parameter.to_string().as_bytes());
+        data.extend_from_slice(&address.to_bytes());
+        data.extend_from_slice(&parameter.to_bytes());
         data.push(ENQ.as_byte());
         self.state.read_in_progress = Some(parameter);
         SendData::new(self.state, data)

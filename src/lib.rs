@@ -1,5 +1,6 @@
 use nom::lib::std::fmt::Formatter;
 use nom::lib::std::str::FromStr;
+use std::convert::{TryFrom, TryInto};
 use std::error::Error as StdError;
 use std::fmt;
 
@@ -14,16 +15,25 @@ pub type Value = i32;
 pub struct Address(u8);
 
 impl Address {
-    pub fn new(address: u8) -> Option<Address> {
+    pub fn new(address: u8) -> Result<Address, X328Error> {
         if address <= 99 {
-            Some(Address(address))
+            Ok(Address(address))
         } else {
-            None
+            Err(X328Error::InvalidAddress)
         }
     }
 
     pub fn new_unchecked(address: u8) -> Address {
         Address::new(address).expect("Address out of range")
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        use std::io::Write;
+        let mut buf = vec![0; 4];
+        write!(&mut buf[1..], "{:02}", self.0).expect("Address formatting failed");
+        buf[0] = buf[1];
+        buf[3] = buf[2];
+        buf
     }
 }
 
@@ -39,6 +49,14 @@ impl Into<usize> for Address {
     }
 }
 
+impl TryFrom<usize> for Address {
+    type Error = X328Error;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        Address::new(value.try_into().map_err(|_| X328Error::InvalidAddress)?)
+    }
+}
+
 impl FromStr for Address {
     type Err = X328Error;
 
@@ -48,16 +66,13 @@ impl FromStr for Address {
             Err(X328Error::InvalidAddress)
         } else {
             Address::new(s.parse().map_err(|_e| X328Error::InvalidAddress)?)
-                .ok_or(X328Error::InvalidAddress)
         }
     }
 }
 
 impl ToString for Address {
     fn to_string(&self) -> String {
-        let addr_str = format!("{:02}", self.0);
-        let x = addr_str.as_bytes();
-        String::from_utf8(vec![x[0], x[0], x[1], x[1]]).expect("Failed to construct address string")
+        String::from_utf8(self.to_bytes()).expect("Failed to construct address string")
     }
 }
 
@@ -68,11 +83,11 @@ pub(crate) type ParameterOffset = i16;
 impl Parameter {
     /// Create a new Parameter, checking that the given value
     /// is in the range [0..9999].
-    pub fn new(parameter: i16) -> Option<Parameter> {
+    pub fn new(parameter: i16) -> Result<Parameter, X328Error> {
         if (0 <= parameter) && (parameter <= 9999) {
-            Some(Parameter(parameter))
+            Ok(Parameter(parameter))
         } else {
-            None
+            Err(X328Error::InvalidParameter)
         }
     }
     /// Panics if parameter is outside of the range 0..9999
@@ -80,8 +95,19 @@ impl Parameter {
         Parameter::new(parameter).expect("Parameter out of range")
     }
 
-    pub(crate) fn checked_add(&self, offset: ParameterOffset) -> Option<Parameter> {
-        Parameter::new(self.0.checked_add(offset)?)
+    pub(crate) fn checked_add(&self, offset: ParameterOffset) -> Result<Parameter, X328Error> {
+        Parameter::new(
+            self.0
+                .checked_add(offset)
+                .ok_or(X328Error::InvalidParameter)?,
+        )
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        use std::io::Write;
+        let mut buf = vec![0; 4];
+        write!(buf.as_mut_slice(), "{:04}", self.0).expect("Parameter format failed");
+        buf
     }
 }
 
@@ -97,6 +123,14 @@ impl Into<usize> for Parameter {
     }
 }
 
+impl TryFrom<usize> for Parameter {
+    type Error = X328Error;
+
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        Parameter::new(value.try_into().map_err(|_| X328Error::InvalidParameter)?)
+    }
+}
+
 impl FromStr for Parameter {
     type Err = X328Error;
 
@@ -106,14 +140,13 @@ impl FromStr for Parameter {
             Err(X328Error::InvalidParameter)
         } else {
             Parameter::new(s.parse().map_err(|_e| X328Error::InvalidParameter)?)
-                .ok_or(X328Error::InvalidParameter)
         }
     }
 }
 
 impl ToString for Parameter {
     fn to_string(&self) -> String {
-        format!("{:04}", self.0)
+        String::from_utf8(self.to_bytes()).expect("Parameter to string failed")
     }
 }
 
@@ -172,11 +205,11 @@ mod tests {
 
         let p10 = Parameter::new_unchecked(10);
         assert_eq!(p10, 10); // usize comparison
-        assert_eq!(p10.checked_add(10), Some(Parameter(20)));
-        assert_eq!(p10.checked_add(-10), Some(Parameter(0)));
-        assert_eq!(p10.checked_add(-20), None);
+        assert_eq!(p10.checked_add(10), Ok(Parameter(20)));
+        assert_eq!(p10.checked_add(-10), Ok(Parameter(0)));
+        assert!(p10.checked_add(-20).is_err());
 
-        assert_eq!(Parameter(9999).checked_add(1), None);
+        assert!(Parameter(9999).checked_add(1).is_err());
 
         let str = p10.to_string();
         assert_eq!(str, "0010");

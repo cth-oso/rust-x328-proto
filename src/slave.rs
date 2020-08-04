@@ -134,7 +134,7 @@ impl ReadData {
             }
             ReadAgain(offset) => {
                 if let Some(Command::Read { parameter }) = self.state.last_command {
-                    if let Some(next_param) = parameter.checked_add(offset) {
+                    if let Ok(next_param) = parameter.checked_add(offset) {
                         ReadParam::from_state(self.state, next_param)
                     } else {
                         SendData::from_state(self.state, vec![EOT])
