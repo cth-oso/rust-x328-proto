@@ -17,7 +17,7 @@ impl Buffer {
     }
 
     pub fn as_str_slice(&self) -> &str {
-        std::str::from_utf8(self.data.as_slice()).unwrap()
+        std::str::from_utf8(&self.data[self.read_pos..]).unwrap()
     }
 
     pub fn consume(&mut self, len: usize) {
@@ -26,7 +26,7 @@ impl Buffer {
     }
 
     pub fn write(&mut self, bytes: &[u8]) {
-        if self.read_pos == self.len() {
+        if self.read_pos == self.data.len() {
             self.clear();
         }
         let write_pos = self.data.len();
