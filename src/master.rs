@@ -137,7 +137,7 @@ pub trait Receiver<R: Receiver<R>> {
     fn receive_data(self, data: &[u8]) -> ReceiverResult<R, Self::Response>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum WriteResponse {
     WriteOk,
     WriteFailed,
@@ -180,7 +180,7 @@ impl Receiver<ReceiveWriteResponse> for ReceiveWriteResponse {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ReadResponse {
     InvalidParameter,
     Ok(Value),
@@ -241,7 +241,8 @@ mod tests {
 
     #[derive(Debug)]
     pub struct StreamMaster<IO>
-// where IO: std::io::Read + std::io::Write
+    where
+        IO: std::io::Read + std::io::Write,
     {
         idle_state: Option<Master>,
         stream: IO,
@@ -326,12 +327,12 @@ mod tests {
         let addr10 = Address::new_unchecked(10);
         let param20 = Parameter::new_unchecked(20);
         let x = master.write_parameter(addr10, param20, 3);
-        let x = x.unwrap();
-        println!("Transmission error (SOX): {:?}", x);
-        serial_sim.borrow_mut().trigger_io_error();
+        assert_eq!(x.unwrap(), WriteResponse::TransmissionError);
+        serial_sim.borrow_mut().trigger_write_error();
         let x = master.write_parameter(addr10, param20, 3);
-        println!("IO error: {:?}", x);
+        assert_eq!(x.unwrap_err(), IOError);
         let x = master.write_parameter(addr10, param20, 3);
         println!("Write success: {:?}", x);
+        assert_eq!(x.unwrap(), WriteResponse::WriteOk);
     }
 }

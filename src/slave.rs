@@ -285,7 +285,8 @@ pub(crate) mod tests {
         rx: Vec<u8>,
         rx_pos: usize,
         tx: Vec<u8>,
-        do_io_error: bool,
+        do_read_error: bool,
+        do_write_error: bool,
     }
 
     pub(crate) struct SerialIOPlane(Rc<RefCell<SerialInterface>>);
@@ -302,20 +303,25 @@ pub(crate) mod tests {
                 rx: rx.to_vec(),
                 tx: Vec::new(),
                 rx_pos: 0,
-                do_io_error: false,
+                do_read_error: false,
+                do_write_error: false,
             }))
         }
 
-        pub fn trigger_io_error(&mut self) {
-            self.do_io_error = true;
+        pub fn trigger_write_error(&mut self) {
+            self.do_write_error = true;
+        }
+
+        pub fn trigger_read_error(&mut self) {
+            self.do_read_error = true;
         }
     }
 
     impl std::io::Read for SerialIOPlane {
         fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
             let mut inner = self.0.borrow_mut();
-            if inner.do_io_error {
-                inner.do_io_error = false;
+            if inner.do_read_error {
+                inner.do_read_error = false;
                 Err(Error::new(ErrorKind::PermissionDenied, X328Error::IOError))
             } else {
                 let old_pos = inner.rx_pos;
@@ -330,8 +336,8 @@ pub(crate) mod tests {
     impl std::io::Write for SerialIOPlane {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
             let mut inner = self.0.borrow_mut();
-            if inner.do_io_error {
-                inner.do_io_error = false;
+            if inner.do_write_error {
+                inner.do_write_error = false;
                 Err(Error::new(ErrorKind::PermissionDenied, X328Error::IOError))
             } else {
                 inner.tx.write(buf)
