@@ -170,11 +170,11 @@ fn param_data_etx(buf: &Buf) -> IResult<&Buf, (Parameter, Value, bool)> {
 }
 
 fn write_command(buf: &Buf) -> IResult<&Buf, CommandToken> {
-    match param_data_etx(buf) {
-        Ok((buf, (param, value, true))) => Ok((buf, WriteParameter(param, value))),
-        Ok((buf, (_param, _value, false))) => Ok((buf, SendNAK)),
-        Err(Incomplete(x)) => Err(Incomplete(x)),
-        Err(_) => Ok((buf, SendNAK)),
+    let (buf, (param, value, bcc_ok)) = param_data_etx(buf)?;
+    if bcc_ok {
+        Ok((buf, WriteParameter(param, value)))
+    } else {
+        Ok((buf, SendNAK))
     }
 }
 
@@ -212,6 +212,8 @@ mod tests {
     use super::*;
     use nom::error::VerboseError;
 
+    use crate::buffer::Buffer;
+    use crate::nom_parser::CommandToken::NeedData;
     use ascii::AsciiChar::{Space, EOT, SOX};
     use ascii::{AsAsciiStr, AsciiString};
     use nom::Needed::Size;
@@ -220,6 +222,13 @@ mod tests {
         ($x: expr) => {
             Err(Incomplete(Size($x)))
         };
+    }
+
+    #[test]
+    fn test_parse_command() {
+        let mut buf = Buffer::new();
+        buf.write(b"0");
+        assert_eq!(parse_command(buf.as_str_slice()), (0, NeedData));
     }
 
     #[test]

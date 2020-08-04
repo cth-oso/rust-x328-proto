@@ -103,11 +103,11 @@ impl ReadData {
         use CommandToken::*;
 
         let (consumed, token) = { nom_parser::parse_command(self.input_buffer.as_str_slice()) };
-        self.input_buffer.consume(consumed);
 
         if token == NeedData {
-            return Slave::ReadData(self);
+            return self.need_data();
         }
+        self.input_buffer.consume(consumed);
 
         // Reset is the only token we process with data remaining in the buffer
         if let Reset(address) = &token {
@@ -126,7 +126,7 @@ impl ReadData {
         match token {
             Reset(_) => {
                 // see above
-                Slave::ReadData(self)
+                self.need_data()
             }
             ReadParameter(parameter) => ReadParam::from_state(self.state, parameter),
             WriteParameter(parameter, value) => {
@@ -140,15 +140,20 @@ impl ReadData {
                         SendData::from_state(self.state, vec![EOT])
                     }
                 } else {
-                    Slave::ReadData(self)
+                    self.need_data()
                 }
             }
             SendNAK => self.send_nak(),
-            NeedData => Slave::ReadData(self),
+            NeedData => self.need_data(),
         }
     }
 
-    fn send_nak(self) -> Slave {
+    fn need_data(self) -> Slave {
+        Slave::ReadData(self)
+    }
+
+    fn send_nak(mut self) -> Slave {
+        self.state.last_address = None;
         SendData::from_state(self.state, vec![NAK])
     }
 }
