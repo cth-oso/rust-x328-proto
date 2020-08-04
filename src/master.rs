@@ -117,6 +117,12 @@ impl<R: Receiver<R>> SendData<R> {
     pub fn data_sent(self) -> R {
         R::new(self.state)
     }
+
+    pub fn send_failed(mut self) -> Master {
+        self.state.last_address = None;
+        self.state.read_in_progress = None;
+        Master::from(self.state)
+    }
 }
 
 #[derive(Debug)]
@@ -229,6 +235,7 @@ impl Receiver<ReceiveReadResponse> for ReceiveReadResponse {
 mod tests {
     use super::*;
     use crate::slave::tests::{SerialIOPlane, SerialInterface};
+    use crate::X328Error::IOError;
     use ascii::AsciiChar::{ACK, NAK};
     use std::collections::HashMap;
 
@@ -259,10 +266,8 @@ mod tests {
         ) -> Result<WriteResponse, X328Error> {
             let idle_state = self.take_idle(); // self.idle_state must be Some at start of call
             let data_out = idle_state.write_parameter(address, parameter, value);
-
-            self.send_data(data_out.as_slice())?; // FIXME: handle error state
-
-            Ok(self.receive_data(data_out.data_sent()))
+            let receiver = self.send_data(data_out)?;
+            Ok(self.receive_data(receiver))
         }
 
         pub fn read_parameter(
@@ -272,12 +277,17 @@ mod tests {
         ) -> Result<ReadResponse, X328Error> {
             let idle = self.take_idle();
             let send = idle.read_parameter(address, parameter);
-            self.send_data(send.as_slice())?;
-            Ok(self.receive_data(send.data_sent()))
+            let receiver = self.send_data(send)?;
+            Ok(self.receive_data(receiver))
         }
 
-        fn send_data(&mut self, data: &[u8]) -> std::io::Result<()> {
-            self.stream.write_all(data)
+        fn send_data<T: Receiver<T>>(&mut self, sender: SendData<T>) -> Result<T, X328Error> {
+            if let Err(_err) = self.stream.write_all(sender.as_slice()) {
+                self.idle_state = Some(sender.send_failed());
+                Err(X328Error::IOError)
+            } else {
+                Ok(sender.data_sent())
+            }
         }
 
         fn receive_data<T: Receiver<T>>(&mut self, mut receiver: T) -> T::Response {
@@ -307,7 +317,7 @@ mod tests {
 
     #[test]
     fn master_main_loop() {
-        let data_in = [SOX.as_byte(), NAK.as_byte()];
+        let data_in = [SOX.as_byte(), ACK.as_byte()];
         let serial_sim = SerialInterface::new(&data_in);
         let mut serial = SerialIOPlane::new(&serial_sim);
         // let mut registers: HashMap<Parameter, Value> = HashMap::new();
@@ -317,11 +327,11 @@ mod tests {
         let param20 = Parameter::new_unchecked(20);
         let x = master.write_parameter(addr10, param20, 3);
         let x = x.unwrap();
-        println!("{:?}", x);
+        println!("Transmission error (SOX): {:?}", x);
         serial_sim.borrow_mut().trigger_io_error();
         let x = master.write_parameter(addr10, param20, 3);
-        println!("{:?}", x);
+        println!("IO error: {:?}", x);
         let x = master.write_parameter(addr10, param20, 3);
-        println!("{:?}", x);
+        println!("Write success: {:?}", x);
     }
 }
