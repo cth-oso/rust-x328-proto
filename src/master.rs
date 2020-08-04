@@ -238,6 +238,7 @@ mod tests {
     use crate::X328Error::IOError;
     use ascii::AsciiChar::{ACK, NAK};
     use std::collections::HashMap;
+    use std::convert::TryInto;
 
     #[derive(Debug)]
     pub struct StreamMaster<IO>
@@ -334,5 +335,21 @@ mod tests {
         let x = master.write_parameter(addr10, param20, 3);
         println!("Write success: {:?}", x);
         assert_eq!(x.unwrap(), WriteResponse::WriteOk);
+    }
+
+    #[test]
+    fn write_parameter() -> Result<(), X328Error> {
+        let x = Master::new().write_parameter(43.try_into()?, 1234.try_into()?, 56);
+        // println!("{}", String::from_utf8(x.as_slice().to_vec()).unwrap());
+        assert_eq!(x.as_slice(), b"\x044433\x02123400056\x034");
+        Ok(())
+    }
+
+    #[test]
+    fn read_parameter() -> Result<(), X328Error> {
+        let x = Master::new().read_parameter(43.try_into()?, 1234.try_into()?);
+        // println!("{}", String::from_utf8(x.as_slice().to_vec()).unwrap());
+        assert_eq!(x.as_slice(), b"\x0444331234\x05");
+        Ok(())
     }
 }
