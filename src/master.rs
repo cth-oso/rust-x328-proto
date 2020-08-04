@@ -133,8 +133,8 @@ pub trait Receiver<R: Receiver<R>> {
 
 #[derive(Debug)]
 pub enum WriteResponse {
-    ACK,
-    NAK,
+    WriteOk,
+    WriteFailed,
     TransmissionError,
 }
 
@@ -162,13 +162,12 @@ impl Receiver<ReceiveWriteResponse> for ReceiveWriteResponse {
 
         self.buffer.write(data);
         let (consumed, token) = { parse_reponse(self.buffer.as_str_slice()) };
-        println!("{:?} {:?}", consumed, token);
         self.buffer.consume(consumed);
         match token {
             NeedData => ReceiverResult::NeedData(self),
-            WriteOk => ReceiverResult::Done(self.state.into(), WriteResponse::ACK),
+            WriteOk => ReceiverResult::Done(self.state.into(), WriteResponse::WriteOk),
             WriteFailed | InvalidParameter => {
-                ReceiverResult::Done(self.state.into(), WriteResponse::NAK)
+                ReceiverResult::Done(self.state.into(), WriteResponse::WriteFailed)
             }
             _ => ReceiverResult::Done(self.state.into(), WriteResponse::TransmissionError),
         }
@@ -284,7 +283,6 @@ mod tests {
             let mut data = [0];
             loop {
                 match if let Ok(len) = self.stream.read(&mut data) {
-                    println!("received {}", data[0]);
                     receiver.receive_data(&data[..len])
                 } else {
                     receiver.receive_data(&[] as &[u8])
