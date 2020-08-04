@@ -1,17 +1,17 @@
 use crate::buffer::Buffer;
 use crate::nom_parser::{self, parse_read_response, parse_write_reponse};
-use crate::{Address, Parameter, Value, X328Error};
+use crate::{Address, Parameter, Value};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
 use crate::slave::bcc;
-use ascii::AsciiChar::{ENQ, EOT, ETX, SOX};
+use ascii::AsciiChar::{BackSpace, ACK, ENQ, EOT, ETX, NAK, SOX};
 
 type StateT = Box<MasterState>;
 
 pub struct MasterState {
-    last_address: Option<Address>,
-    read_in_progress: Option<Parameter>,
+    read_again: Option<(Address, Parameter)>,
+    read_in_progress: Option<(Address, Parameter)>,
     slaves: [SlaveState; 100],
 }
 
@@ -19,8 +19,8 @@ impl Debug for MasterState {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "MasterState {{ last_address: {:?}, slaves: [..]}}",
-            self.last_address
+            "MasterState {{ read_again: {:?}, slaves: [..]}}",
+            self.read_again
         )
     }
 }
@@ -28,7 +28,6 @@ impl Debug for MasterState {
 #[derive(Copy, Clone)]
 pub struct SlaveState {
     can_read_again: bool,
-    can_write_again: bool,
 }
 
 #[derive(Debug)]
@@ -40,22 +39,22 @@ impl Master {
     pub fn new() -> Master {
         Master {
             state: Box::new(MasterState {
-                last_address: None,
+                read_again: None,
                 read_in_progress: None,
                 slaves: [SlaveState {
                     can_read_again: false,
-                    can_write_again: false,
                 }; 100],
             }),
         }
     }
 
     pub fn write_parameter(
-        self,
+        mut self,
         address: Address,
         parameter: Parameter,
         value: Value,
     ) -> SendData<ReceiveWriteResponse> {
+        self.state.read_again = None;
         let mut data = Vec::with_capacity(20);
         data.push(EOT.as_byte());
         data.extend_from_slice(&address.to_bytes());
@@ -73,12 +72,38 @@ impl Master {
         parameter: Parameter,
     ) -> SendData<ReceiveReadResponse> {
         let mut data = Vec::with_capacity(10);
-        data.push(EOT.as_byte());
-        data.extend_from_slice(&address.to_bytes());
-        data.extend_from_slice(&parameter.to_bytes());
-        data.push(ENQ.as_byte());
-        self.state.read_in_progress = Some(parameter);
+        if let Some(again) = self.read_again(address, parameter) {
+            data.push(again);
+        } else {
+            data.push(EOT.as_byte());
+            data.extend_from_slice(&address.to_bytes());
+            data.extend_from_slice(&parameter.to_bytes());
+            data.push(ENQ.as_byte());
+        }
+        self.state.read_in_progress = Some((address, parameter));
         SendData::new(self.state, data)
+    }
+
+    fn read_again(&mut self, address: Address, parameter: Parameter) -> Option<u8> {
+        let (old_addr, old_param) = self.state.read_again.take()?;
+        if old_addr == address && self.get_slave_capabilites(address).can_read_again {
+            match parameter.0 as i32 - old_param.0 as i32 {
+                0 => Some(NAK.as_byte()),
+                1 => Some(ACK.as_byte()),
+                -1 => Some(BackSpace.as_byte()),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    }
+
+    pub fn set_slave_capabilites(&mut self, address: Address, can_read_again: bool) {
+        self.state.slaves[address.as_usize()] = SlaveState { can_read_again };
+    }
+
+    fn get_slave_capabilites(&self, address: Address) -> SlaveState {
+        self.state.slaves[address.as_usize()]
     }
 }
 
@@ -89,7 +114,8 @@ impl Default for Master {
 }
 
 impl From<StateT> for Master {
-    fn from(state: StateT) -> Self {
+    fn from(mut state: StateT) -> Self {
+        state.read_in_progress = None;
         Master { state }
     }
 }
@@ -119,7 +145,7 @@ impl<R: Receiver<R>> SendData<R> {
     }
 
     pub fn send_failed(mut self) -> Master {
-        self.state.last_address = None;
+        self.state.read_again = None;
         self.state.read_in_progress = None;
         Master::from(self.state)
     }
@@ -221,8 +247,11 @@ impl Receiver<ReceiveReadResponse> for ReceiveReadResponse {
                     == self
                         .state
                         .read_in_progress
-                        .expect("read_in_progress is None while running read query!")) =>
+                        .expect("read_in_progress is None while running read query!")
+                        .1) =>
             {
+                self.state.read_again = self.state.read_in_progress;
+                debug_assert!(self.state.read_again.is_some());
                 Done(self.state.into(), ReadResponse::Ok(value))
             }
             InvalidParameter => Done(self.state.into(), ReadResponse::InvalidParameter),
@@ -313,6 +342,7 @@ pub mod io {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::X328Error;
     use std::convert::TryInto;
 
     #[test]
@@ -328,6 +358,18 @@ mod tests {
         let x = Master::new().read_parameter(43.try_into()?, 1234.try_into()?);
         // println!("{}", String::from_utf8(x.as_slice().to_vec()).unwrap());
         assert_eq!(x.as_slice(), b"\x0444331234\x05");
+        Ok(())
+    }
+
+    #[test]
+    fn read_again() -> Result<(), X328Error> {
+        let mut idle = Master::new();
+        let addr = Address::new(10)?;
+        let param = Parameter::new(20)?;
+        idle.set_slave_capabilites(addr, true);
+        idle.state.read_again = Some((addr, param));
+        let send = idle.read_parameter(addr, param.checked_add(1)?);
+        assert_eq!(send.as_slice(), [ACK.as_byte()]);
         Ok(())
     }
 }

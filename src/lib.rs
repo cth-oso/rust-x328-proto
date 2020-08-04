@@ -35,6 +35,10 @@ impl Address {
         buf[3] = buf[2];
         buf
     }
+
+    pub fn as_usize(&self) -> usize {
+        self.0 as usize
+    }
 }
 
 impl PartialEq<usize> for Address {
