@@ -62,32 +62,47 @@ pub fn parse_command(buf: &Buf) -> (usize, CommandToken) {
     }
 }
 
-pub fn parse_reponse(buf: &Buf) -> (usize, ResponseToken) {
-    match alt((
-        value(ResponseToken::WriteOk, ascii_char(ACK)),
-        value(ResponseToken::WriteFailed, ascii_char(NAK)),
-        value(ResponseToken::InvalidParameter, ascii_char(EOT)),
-        read_response,
-    ))(buf)
-    {
-        Ok((remaining, token)) => (buf.len() - remaining.len(), token),
+pub fn parse_write_reponse(buf: &Buf) -> (usize, ResponseToken) {
+    parse_response(
+        alt((
+            value(ResponseToken::WriteOk, ascii_char(ACK)),
+            value(ResponseToken::WriteFailed, ascii_char(NAK)),
+            value(ResponseToken::InvalidParameter, ascii_char(EOT)),
+        ))(buf),
+        buf.len(),
+    )
+}
+
+pub fn parse_read_response(buf: &Buf) -> (usize, ResponseToken) {
+    parse_response(
+        alt((
+            value(ResponseToken::InvalidParameter, ascii_char(EOT)),
+            read_response,
+        ))(buf),
+        buf.len(),
+    )
+}
+
+fn parse_response(
+    alt_match: IResult<&Buf, ResponseToken>,
+    buf_len: usize,
+) -> (usize, ResponseToken) {
+    match alt_match {
+        Ok((remaining, token)) => (buf_len - remaining.len(), token),
         Err(Incomplete(_)) => (0, ResponseToken::NeedData),
-        Err(_) => panic!("FIXME bad response handling"), // FIXME
+        Err(_) => (0, ResponseToken::InvalidDataReceived),
     }
 }
 
 fn read_response(buf: &Buf) -> IResult<&Buf, ResponseToken> {
-    match param_data_etx(buf) {
-        Ok((buf, (parameter, value, true /* BCC ok */))) => {
-            Ok((buf, ResponseToken::ReadOK { parameter, value }))
-        }
-        Ok((buf, (_parameter, _value, false /* BCC failed */))) => {
-            Ok((buf, ResponseToken::InvalidDataReceived))
-        }
-        Err(Incomplete(x)) => Err(Incomplete(x)),
-        Err(_) => Ok((buf, ResponseToken::InvalidDataReceived)),
+    let (buf, (parameter, value, bcc_ok)) = param_data_etx(buf)?;
+    if !bcc_ok {
+        Ok((buf, ResponseToken::InvalidDataReceived))
+    } else {
+        Ok((buf, ResponseToken::ReadOK { parameter, value }))
     }
 }
+
 fn read_until_eot(buf: &Buf) -> IResult<&Buf, CommandToken> {
     let (buf, _) = take_while(|c| c != EOT.as_char())(buf)?;
     slave_reset(buf)

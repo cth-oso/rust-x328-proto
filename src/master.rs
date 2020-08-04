@@ -1,5 +1,5 @@
 use crate::buffer::Buffer;
-use crate::nom_parser::{self, parse_reponse};
+use crate::nom_parser::{self, parse_read_response, parse_write_reponse};
 use crate::{Address, Parameter, Value, X328Error};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
@@ -167,7 +167,7 @@ impl Receiver<ReceiveWriteResponse> for ReceiveWriteResponse {
         }
 
         self.buffer.write(data);
-        let (consumed, token) = { parse_reponse(self.buffer.as_str_slice()) };
+        let (consumed, token) = { parse_write_reponse(self.buffer.as_str_slice()) };
         self.buffer.consume(consumed);
         match token {
             NeedData => ReceiverResult::NeedData(self),
@@ -212,7 +212,7 @@ impl Receiver<ReceiveReadResponse> for ReceiveReadResponse {
 
         self.buffer.write(data);
 
-        let (consumed, token) = { parse_reponse(self.buffer.as_str_slice()) };
+        let (consumed, token) = { parse_read_response(self.buffer.as_str_slice()) };
         self.buffer.consume(consumed);
         match token {
             NeedData => ReceiverResult::NeedData(self),
