@@ -161,6 +161,7 @@ pub enum X328Error {
     IOError,
     OtherError,
     InvalidDataReceived,
+    WriteNAK,
 }
 
 impl StdError for X328Error {}

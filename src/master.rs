@@ -283,28 +283,37 @@ pub mod io {
                 stream: io,
             }
         }
+
         // Sends a write command to the slave. May use the shorter "write again" command form
         pub fn write_parameter(
             &mut self,
             address: Address,
             parameter: Parameter,
             value: Value,
-        ) -> Result<WriteResponse, X328Error> {
+        ) -> Result<(), X328Error> {
             let idle_state = self.take_idle(); // self.idle_state must be Some at start of call
             let data_out = idle_state.write_parameter(address, parameter, value);
             let receiver = self.send_data(data_out)?;
-            Ok(self.receive_data(receiver))
+            match self.receive_data(receiver) {
+                WriteResponse::WriteOk => Ok(()),
+                WriteResponse::WriteFailed => Err(X328Error::WriteNAK),
+                WriteResponse::TransmissionError => Err(X328Error::IOError),
+            }
         }
 
         pub fn read_parameter(
             &mut self,
             address: Address,
             parameter: Parameter,
-        ) -> Result<ReadResponse, X328Error> {
+        ) -> Result<Value, X328Error> {
             let idle = self.take_idle();
             let send = idle.read_parameter(address, parameter);
             let receiver = self.send_data(send)?;
-            Ok(self.receive_data(receiver))
+            match self.receive_data(receiver) {
+                ReadResponse::Ok(value) => Ok(value),
+                ReadResponse::InvalidParameter => Err(X328Error::InvalidParameter),
+                ReadResponse::TransmissionError => Err(X328Error::IOError),
+            }
         }
 
         fn send_data<T: Receiver<T>>(&mut self, sender: SendData<T>) -> Result<T, X328Error> {
