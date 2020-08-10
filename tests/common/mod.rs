@@ -6,6 +6,7 @@ use std::cmp::min;
 use std::io::{Error, ErrorKind};
 use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex, Weak};
+use std::time::Duration;
 use x328_proto::X328Error;
 
 pub struct SerialInterface {
@@ -78,28 +79,41 @@ impl std::io::Write for SerialIOPlane {
 
 type BusT = Arc<Mutex<VecDeque<u8>>>;
 
+#[derive(Default)]
 pub struct RS422Bus {
     masters: Mutex<Vec<Weak<BusInterfaceLink>>>,
     slaves: Mutex<Vec<Weak<BusInterfaceLink>>>,
+    master_data_available: Arc<Condvar>,
+    slave_data_available: Arc<Condvar>,
 }
 
 impl RS422Bus {
     pub fn new() -> Arc<RS422Bus> {
-        Arc::new(RS422Bus {
-            masters: Mutex::new(vec![]),
-            slaves: Mutex::new(vec![]),
-        })
+        Default::default()
     }
 
     pub fn new_master_interface(self: &Arc<Self>) -> BusInterface {
-        let i = BusInterface::new(Arc::clone(self), true);
-        self.masters.lock().unwrap().push(Arc::downgrade(&i.link));
-        i
+        let link = Arc::new(BusInterfaceLink {
+            is_master: true,
+            rx: Default::default(),
+            rx_condvar: Arc::clone(&self.master_data_available),
+        });
+        self.masters.lock().unwrap().push(Arc::downgrade(&link));
+        BusInterface::new(Arc::clone(self), link)
     }
-    pub fn new_slave_interface(self: &Arc<Self>) -> BusInterface {
-        let i = BusInterface::new(Arc::clone(self), false);
-        self.slaves.lock().unwrap().push(Arc::downgrade(&i.link));
-        i
+
+    pub fn new_slave_interface(self: &Arc<RS422Bus>) -> BusInterface {
+        let link = Arc::new(BusInterfaceLink {
+            is_master: false,
+            rx: Default::default(),
+            rx_condvar: Arc::clone(&self.slave_data_available),
+        });
+        self.slaves.lock().unwrap().push(Arc::downgrade(&link));
+        BusInterface::new(Arc::clone(&self), link)
+    }
+
+    pub fn wake_blocked_slaves(&self) {
+        self.slave_data_available.notify_all()
     }
 
     fn send_to_slaves(self: &Arc<Self>, data: u8) {
@@ -107,8 +121,8 @@ impl RS422Bus {
         for weak in slaves.iter() {
             if let Some(slave) = weak.upgrade() {
                 slave.rx.lock().unwrap().push_back(data);
-                slave.rx_condvar.notify_all();
             }
+            self.slave_data_available.notify_all();
         }
     }
 
@@ -117,8 +131,8 @@ impl RS422Bus {
         for weak in masters.iter() {
             if let Some(master) = weak.upgrade() {
                 master.rx.lock().unwrap().push_back(data);
-                master.rx_condvar.notify_all();
             }
+            self.master_data_available.notify_all();
         }
     }
 }
@@ -126,27 +140,25 @@ impl RS422Bus {
 pub struct BusInterface {
     bus: Arc<RS422Bus>,
     link: Arc<BusInterfaceLink>,
-    is_master: bool,
     pub blocking_read: bool,
+    pub timeout: Duration,
     pub do_read_error: bool,
     pub do_write_error: bool,
 }
 
 struct BusInterfaceLink {
+    is_master: bool,
     rx: BusT,
-    rx_condvar: Condvar,
+    rx_condvar: Arc<Condvar>,
 }
 
 impl BusInterface {
-    fn new(bus: Arc<RS422Bus>, is_master: bool) -> BusInterface {
+    fn new(bus: Arc<RS422Bus>, link: Arc<BusInterfaceLink>) -> BusInterface {
         BusInterface {
             bus,
-            link: Arc::new(BusInterfaceLink {
-                rx: Arc::new(Mutex::new(VecDeque::new())),
-                rx_condvar: Condvar::new(),
-            }),
-            is_master,
+            link,
             blocking_read: true,
+            timeout: Duration::from_secs(1),
             do_read_error: false,
             do_write_error: false,
         }
@@ -157,28 +169,37 @@ impl std::io::Read for BusInterface {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if self.do_read_error {
             self.do_read_error = false;
-            Err(Error::new(ErrorKind::PermissionDenied, X328Error::IOError))
+            return Err(Error::new(ErrorKind::PermissionDenied, X328Error::IOError));
+        }
+
+        let mut rx = if self.blocking_read {
+            self.link.rx.lock().expect("Read mutex is poisoned")
         } else {
-            let mut rx = if self.blocking_read {
-                self.link.rx.lock().expect("Read mutex is poisoned")
-            } else {
-                self.link
-                    .rx
-                    .try_lock()
-                    .map_err(|_| Error::new(ErrorKind::WouldBlock, X328Error::IOError))?
-            };
-            loop {
-                match rx.pop_front() {
-                    Some(byte) => {
-                        buf[0] = byte;
-                        return Ok(1);
-                    }
-                    None => {
-                        if self.blocking_read {
-                            rx = self.link.rx_condvar.wait(rx).unwrap();
-                        } else {
-                            return Ok(0);
+            self.link
+                .rx
+                .try_lock()
+                .map_err(|_| Error::new(ErrorKind::WouldBlock, X328Error::IOError))?
+        };
+
+        loop {
+            match rx.pop_front() {
+                Some(byte) => {
+                    buf[0] = byte;
+                    return Ok(1);
+                }
+                None => {
+                    if self.blocking_read {
+                        let x = self
+                            .link
+                            .rx_condvar
+                            .wait_timeout(rx, self.timeout)
+                            .expect("Mutex lock failed");
+                        rx = x.0;
+                        if rx.is_empty() {
+                            return Err(Error::new(ErrorKind::TimedOut, X328Error::IOError));
                         }
+                    } else {
+                        return Ok(0);
                     }
                 }
             }
@@ -193,7 +214,7 @@ impl std::io::Write for BusInterface {
             Err(Error::new(ErrorKind::PermissionDenied, X328Error::IOError))
         } else {
             for byte in buf {
-                if self.is_master {
+                if self.link.is_master {
                     self.bus.send_to_slaves(*byte);
                 } else {
                     self.bus.send_to_masters(*byte)
