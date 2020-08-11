@@ -284,6 +284,13 @@ pub mod io {
             }
         }
 
+        pub fn set_can_read_again(&mut self, address: Address, value: bool) {
+            self.idle_state
+                .as_mut()
+                .unwrap()
+                .set_slave_capabilites(address, value);
+        }
+
         // Sends a write command to the slave. May use the shorter "write again" command form
         pub fn write_parameter(
             &mut self,
