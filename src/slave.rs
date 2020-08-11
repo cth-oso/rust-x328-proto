@@ -208,13 +208,13 @@ impl ReadParam {
     pub fn send_reply_ok(self, value: Value) -> Slave {
         let param = self.parameter.to_string();
         assert_eq!(param.len(), 4);
-        let value = format!("{:+6}", value); //FIXME: make value length adjustable
+        let value = format!("{:+06}", value);
         assert_eq!(value.len(), 6);
 
         let mut data = Vec::with_capacity(15);
         data.push(STX);
         data.extend_from_slice(param.as_bytes());
-        data.extend_from_slice(param.as_bytes());
+        data.extend_from_slice(value.as_bytes());
         data.push(ETX);
         data.push(bcc(&data[1..]));
 

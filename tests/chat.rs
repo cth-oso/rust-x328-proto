@@ -12,11 +12,17 @@ use x328_proto::{master::io::Master, slave::Slave, X328Error};
 fn master_main_loop(io: BusInterface) -> Result<(), X328Error> {
     let mut master = Master::new(io);
     for _ in 1..4 {
-        for addr in 5..7 {
+        for addr in 5..6 {
             println!("master send write");
-            match master.write_parameter(addr.try_into()?, 20.try_into()?, 30 + addr as i32) {
+            let a = addr.try_into().unwrap();
+            match master.write_parameter(a, 20.try_into()?, 30 + addr as i32) {
                 Ok(()) => println!("master: write ok"),
                 Err(err) => println!("master: write error {:?}", err),
+            }
+
+            match master.read_parameter(a, 20.try_into().unwrap()) {
+                Ok(val) => println!("Master read param ok {}", val),
+                Err(err) => println!("Master read error {:?}", err),
             }
         }
     }
