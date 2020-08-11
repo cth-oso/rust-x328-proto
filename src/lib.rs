@@ -168,12 +168,7 @@ impl StdError for X328Error {}
 
 impl fmt::Display for X328Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        use X328Error::*;
-        match self {
-            InvalidAddress => write!(f, "Invalid address"),
-            InvalidParameter => write!(f, "Invalid parameter"),
-            _ => write!(f, "Haha"),
-        }
+        write!(f, "{:?}", self)
     }
 }
 
