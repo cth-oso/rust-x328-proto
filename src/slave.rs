@@ -55,13 +55,6 @@ struct SlaveStateStruct {
 }
 
 impl SlaveStateStruct {
-    fn set_last_command(&mut self, cmd: Command) {
-        self.last_command = Some(cmd);
-    }
-    fn clear_last_command(&mut self) {
-        self.last_command.take();
-    }
-
     fn cmd_to_slave_addr(&self) -> bool {
         Some(self.slave_address) == self.last_address
         // NOTE: This doesn't accept the broadcast address 0
@@ -115,7 +108,7 @@ impl ReadData {
                 AddressToken::Valid(address) => Some(*address),
                 AddressToken::Invalid => None,
             };
-            self.state.clear_last_command();
+            self.state.last_command = None;
         }
 
         // Skip this token and get another if we're not at the end of the buffer
@@ -246,7 +239,7 @@ impl WriteParam {
 
         // only accept commands to our address, if we have an address
         if state.cmd_to_slave_addr() {
-            state.set_last_command(Command::Write);
+            state.last_command = Some(Command::Write);
             Slave::WriteParameter(WriteParam {
                 state,
                 parameter,

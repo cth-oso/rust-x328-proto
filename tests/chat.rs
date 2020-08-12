@@ -11,6 +11,7 @@ use x328_proto::{master::io::Master, slave::Slave, X328Error};
 
 fn master_main_loop(io: BusInterface) -> Result<(), X328Error> {
     let mut master = Master::new(io);
+
     for _ in 1..4 {
         for addr in 5..6 {
             println!("master send write");
@@ -25,6 +26,12 @@ fn master_main_loop(io: BusInterface) -> Result<(), X328Error> {
                 Err(err) => println!("Master read error {:?}", err),
             }
         }
+    }
+    // test read again
+    let a5 = 5.try_into().unwrap();
+    master.set_can_read_again(a5, true);
+    for _ in 0..10 {
+        assert!(master.read_parameter(a5, 25.try_into().unwrap()).is_ok());
     }
     println!("Master terminating");
     Ok(())

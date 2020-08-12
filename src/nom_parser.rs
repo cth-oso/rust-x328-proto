@@ -46,12 +46,12 @@ pub enum ResponseToken {
 
 pub fn parse_command(buf: &Buf) -> (usize, CommandToken) {
     match alt((
-        slave_reset,
-        write_command,
-        read_command,
         read_again,
         read_next,
         read_previous,
+        write_command,
+        slave_reset,
+        read_command,
         read_until_eot,
     ))(buf)
     {
@@ -229,6 +229,10 @@ mod tests {
         let mut buf = Buffer::new();
         buf.write(b"0");
         assert_eq!(parse_command(buf.as_str_slice()), (0, NeedData));
+
+        assert_eq!(parse_command("\x15"), (1, ReadAgain(0)));
+        assert_eq!(parse_command("\x08"), (1, ReadAgain(-1)));
+        assert_eq!(parse_command("\x06"), (1, ReadAgain(1)));
     }
 
     #[test]
