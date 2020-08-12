@@ -87,7 +87,8 @@ impl Master {
     fn read_again(&mut self, address: Address, parameter: Parameter) -> Option<u8> {
         let (old_addr, old_param) = self.state.read_again.take()?;
         if old_addr == address && self.get_slave_capabilites(address).can_read_again {
-            match parameter.0 as i32 - old_param.0 as i32 {
+            let (new, old): (i16, i16) = (parameter.into(), old_param.into());
+            match new - old {
                 0 => Some(NAK.as_byte()),
                 1 => Some(ACK.as_byte()),
                 -1 => Some(BackSpace.as_byte()),
