@@ -34,7 +34,7 @@ fn slave_main_loop() {
             }
 
             Slave::ReadParameter(read_command) => {
-                if read_command.get_parameter() == 3 {
+                if read_command.parameter() == 3 {
                     read_command.send_invalid_parameter()
                 } else {
                     read_command.send_reply_ok(4)
@@ -42,11 +42,11 @@ fn slave_main_loop() {
             }
 
             Slave::WriteParameter(write_command) => {
-                let param = write_command.get_parameter();
+                let param = write_command.parameter();
                 if param == 3 {
                     write_command.write_error()
                 } else {
-                    registers.insert(param, write_command.get_value());
+                    registers.insert(param, write_command.value());
                     write_command.write_ok()
                 }
             }

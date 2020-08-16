@@ -1,5 +1,5 @@
 use crate::buffer::Buffer;
-use crate::nom_parser::{self, parse_read_response, parse_write_reponse};
+use crate::nom_parser::master::{parse_read_response, parse_write_reponse, ResponseToken};
 use crate::{Address, Parameter, Value};
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
@@ -187,16 +187,14 @@ impl Receiver<ReceiveWriteResponse> for ReceiveWriteResponse {
     }
 
     fn receive_data(mut self, data: &[u8]) -> ReceiverResult<ReceiveWriteResponse, Self::Response> {
-        use nom_parser::ResponseToken::*;
+        use ResponseToken::*;
 
         if data.is_empty() {
             return ReceiverResult::Done(self.state.into(), WriteResponse::TransmissionError);
         }
-
         self.buffer.write(data);
-        let (consumed, token) = { parse_write_reponse(self.buffer.as_str_slice()) };
-        self.buffer.consume(consumed);
-        match token {
+
+        match parse_write_reponse(self.buffer.as_str_slice()) {
             NeedData => ReceiverResult::NeedData(self),
             WriteOk => ReceiverResult::Done(self.state.into(), WriteResponse::WriteOk),
             WriteFailed | InvalidParameter => {
@@ -230,8 +228,8 @@ impl Receiver<ReceiveReadResponse> for ReceiveReadResponse {
     }
 
     fn receive_data(mut self, data: &[u8]) -> ReceiverResult<ReceiveReadResponse, Self::Response> {
-        use nom_parser::ResponseToken::*;
         use ReceiverResult::Done;
+        use ResponseToken::*;
 
         if data.is_empty() {
             return ReceiverResult::Done(self.state.into(), ReadResponse::TransmissionError);
@@ -239,9 +237,7 @@ impl Receiver<ReceiveReadResponse> for ReceiveReadResponse {
 
         self.buffer.write(data);
 
-        let (consumed, token) = { parse_read_response(self.buffer.as_str_slice()) };
-        self.buffer.consume(consumed);
-        match token {
+        match parse_read_response(self.buffer.as_str_slice()) {
             NeedData => ReceiverResult::NeedData(self),
             ReadOK { parameter, value }
                 if (parameter

@@ -1,7 +1,7 @@
 use ascii::AsciiChar;
 
 const ACK: u8 = AsciiChar::ACK.as_byte();
-//const BS: u8 = AsciiChar::BackSpace.as_byte();
+// const BS: u8 = AsciiChar::BackSpace.as_byte();
 // const ENQ: u8 = AsciiChar::ENQ.as_byte();
 const EOT: u8 = AsciiChar::EOT.as_byte();
 const ETX: u8 = AsciiChar::ETX.as_byte();
@@ -9,7 +9,7 @@ const NAK: u8 = AsciiChar::NAK.as_byte();
 const STX: u8 = AsciiChar::SOX.as_byte();
 
 use crate::buffer::Buffer;
-use crate::nom_parser::{self, AddressToken, CommandToken};
+use crate::nom_parser::slave::{parse_command, CommandToken};
 pub use crate::{Address, Parameter, Value};
 
 pub type OptionalAddress = Option<Address>;
@@ -49,17 +49,11 @@ type SlaveState = Box<SlaveStateStruct>;
 
 #[derive(Debug)]
 struct SlaveStateStruct {
-    slave_address: Address,
-    last_address: OptionalAddress,
-    last_command: Option<Command>,
+    address: Address,
+    read_again_param: Option<Parameter>,
 }
 
-impl SlaveStateStruct {
-    fn cmd_to_slave_addr(&self) -> bool {
-        Some(self.slave_address) == self.last_address
-        // NOTE: This doesn't accept the broadcast address 0
-    }
-}
+impl SlaveStateStruct {}
 
 #[derive(Debug)]
 pub struct ReadData {
@@ -71,9 +65,8 @@ impl ReadData {
     fn create(address: Address) -> Slave {
         Slave::ReadData(ReadData {
             state: Box::new(SlaveStateStruct {
-                slave_address: address,
-                last_address: None,
-                last_command: None,
+                address,
+                read_again_param: None,
             }),
             input_buffer: Buffer::new(),
         })
@@ -95,21 +88,18 @@ impl ReadData {
     fn parse_buffer(mut self) -> Slave {
         use CommandToken::*;
 
-        let (consumed, token) = { nom_parser::parse_command(self.input_buffer.as_str_slice()) };
-
-        if token == NeedData {
+        // Return early for zero-length buffers so we don't
+        // drop read_again_param before ReadAgain has a chance to match
+        if self.input_buffer.len() == 0 {
             return self.need_data();
         }
+
+        let (consumed, token) = parse_command(self.input_buffer.as_str_slice());
         self.input_buffer.consume(consumed);
 
-        // Reset is the only token we process with data remaining in the buffer
-        if let Reset(address) = &token {
-            self.state.last_address = match address {
-                AddressToken::Valid(address) => Some(*address),
-                AddressToken::Invalid => None,
-            };
-            self.state.last_command = None;
-        }
+        // Take the read again parameter from our state, for matching below.
+        // It would be invalid to use it for later tokens
+        let read_again_param = self.state.read_again_param.take();
 
         // Skip this token and get another if we're not at the end of the buffer
         if self.input_buffer.len() > 0 && consumed > 0 {
@@ -117,27 +107,21 @@ impl ReadData {
         }
 
         match token {
-            Reset(_) => {
-                // see above
-                self.need_data()
+            ReadParameter(address, parameter) if address == self.state.address => {
+                ReadParam::from_state(self.state, parameter)
             }
-            ReadParameter(parameter) => ReadParam::from_state(self.state, parameter),
-            WriteParameter(parameter, value) => {
+            WriteParameter(address, parameter, value) if address == self.state.address => {
                 WriteParam::from_state(self.state, parameter, value)
             }
-            ReadAgain(offset) => {
-                if let Some(Command::Read { parameter }) = self.state.last_command {
-                    if let Ok(next_param) = parameter.checked_add(offset) {
-                        ReadParam::from_state(self.state, next_param)
-                    } else {
-                        SendData::from_state(self.state, vec![EOT])
-                    }
+            ReadAgain(offset) if read_again_param.is_some() => {
+                if let Ok(next_param) = read_again_param.unwrap().checked_add(offset) {
+                    ReadParam::from_state(self.state, next_param)
                 } else {
-                    self.need_data()
+                    SendData::from_state(self.state, vec![EOT])
                 }
             }
-            SendNAK => self.send_nak(),
-            NeedData => self.need_data(),
+            InvalidPayload(address) if address == self.state.address => self.send_nak(),
+            _ => self.need_data(),
         }
     }
 
@@ -145,8 +129,7 @@ impl ReadData {
         Slave::ReadData(self)
     }
 
-    fn send_nak(mut self) -> Slave {
-        self.state.last_address = None;
+    fn send_nak(self) -> Slave {
         SendData::from_state(self.state, vec![NAK])
     }
 }
@@ -185,20 +168,12 @@ pub struct ReadParam {
 }
 
 impl ReadParam {
-    fn from_state(mut state: SlaveState, parameter: Parameter) -> Slave {
-        state.last_command = None;
-
-        if state.cmd_to_slave_addr() {
-            // only accept commands to our address, if we have an address
-            state.last_command = Some(Command::Read { parameter });
-            Slave::ReadParameter(ReadParam { state, parameter })
-        } else {
-            // the command was sent to another address
-            ReadData::from_state(state)
-        }
+    fn from_state(state: SlaveState, parameter: Parameter) -> Slave {
+        Slave::ReadParameter(ReadParam { state, parameter })
     }
 
-    pub fn send_reply_ok(self, value: Value) -> Slave {
+    pub fn send_reply_ok(mut self, value: Value) -> Slave {
+        self.state.read_again_param = Some(self.parameter);
         let param = self.parameter.to_string();
         assert_eq!(param.len(), 4);
         let value = format!("{:+06}", value);
@@ -218,10 +193,10 @@ impl ReadParam {
         SendData::from_state(self.state, vec![EOT])
     }
 
-    pub fn get_address(&self) -> Address {
-        self.state.last_address.unwrap()
+    pub fn address(&self) -> Address {
+        self.state.address
     }
-    pub fn get_parameter(&self) -> Parameter {
+    pub fn parameter(&self) -> Parameter {
         self.parameter
     }
 }
@@ -234,29 +209,21 @@ pub struct WriteParam {
 }
 
 impl WriteParam {
-    fn from_state(mut state: SlaveState, parameter: Parameter, value: Value) -> Slave {
-        state.last_command = None;
-
-        // only accept commands to our address, if we have an address
-        if state.cmd_to_slave_addr() {
-            state.last_command = Some(Command::Write);
-            Slave::WriteParameter(WriteParam {
-                state,
-                parameter,
-                value,
-            })
-        } else {
-            ReadData::from_state(state)
-        }
+    fn from_state(state: SlaveState, parameter: Parameter, value: Value) -> Slave {
+        Slave::WriteParameter(WriteParam {
+            state,
+            parameter,
+            value,
+        })
     }
 
-    pub fn get_address(&self) -> Address {
-        self.state.last_address.unwrap()
+    pub fn address(&self) -> Address {
+        self.state.address
     }
-    pub fn get_parameter(&self) -> Parameter {
+    pub fn parameter(&self) -> Parameter {
         self.parameter
     }
-    pub fn get_value(&self) -> Value {
+    pub fn value(&self) -> Value {
         self.value
     }
 
