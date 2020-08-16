@@ -321,11 +321,16 @@ pub mod io {
         }
 
         fn send_data<T: Receiver<T>>(&mut self, sender: SendData<T>) -> Result<T, X328Error> {
-            if let Err(_err) = self.stream.write_all(sender.as_slice()) {
+            if self
+                .stream
+                .write_all(sender.as_slice())
+                .and_then(|_| self.stream.flush())
+                .is_ok()
+            {
+                Ok(sender.data_sent())
+            } else {
                 self.idle_state = Some(sender.send_failed());
                 Err(X328Error::IOError)
-            } else {
-                Ok(sender.data_sent())
             }
         }
 
