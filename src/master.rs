@@ -122,13 +122,13 @@ impl From<StateT> for Master {
 }
 
 #[derive(Debug)]
-pub struct SendData<R: Receiver<R>> {
+pub struct SendData<R: Receiver> {
     state: StateT,
     data: Vec<u8>,
     receiver: PhantomData<R>,
 }
 
-impl<R: Receiver<R>> SendData<R> {
+impl<R: Receiver> SendData<R> {
     fn new(state: StateT, data: Vec<u8>) -> Self {
         SendData {
             state,
@@ -158,10 +158,10 @@ pub enum ReceiverResult<R, T> {
     Done(Master, T),
 }
 
-pub trait Receiver<R: Receiver<R>> {
+pub trait Receiver: Sized {
     type Response;
     fn new(state: StateT) -> Self;
-    fn receive_data(self, data: &[u8]) -> ReceiverResult<R, Self::Response>;
+    fn receive_data(self, data: &[u8]) -> ReceiverResult<Self, Self::Response>;
 }
 
 #[derive(Debug, PartialEq)]
@@ -177,7 +177,7 @@ pub struct ReceiveWriteResponse {
     buffer: Buffer,
 }
 
-impl Receiver<ReceiveWriteResponse> for ReceiveWriteResponse {
+impl Receiver for ReceiveWriteResponse {
     type Response = WriteResponse;
     fn new(state: StateT) -> ReceiveWriteResponse {
         ReceiveWriteResponse {
@@ -218,7 +218,7 @@ pub struct ReceiveReadResponse {
     buffer: Buffer,
 }
 
-impl Receiver<ReceiveReadResponse> for ReceiveReadResponse {
+impl Receiver for ReceiveReadResponse {
     type Response = ReadResponse;
     fn new(state: StateT) -> ReceiveReadResponse {
         ReceiveReadResponse {
@@ -320,7 +320,7 @@ pub mod io {
             }
         }
 
-        fn send_data<T: Receiver<T>>(&mut self, sender: SendData<T>) -> Result<T, X328Error> {
+        fn send_data<T: Receiver>(&mut self, sender: SendData<T>) -> Result<T, X328Error> {
             if self
                 .stream
                 .write_all(sender.as_slice())
@@ -334,7 +334,7 @@ pub mod io {
             }
         }
 
-        fn receive_data<T: Receiver<T>>(&mut self, mut receiver: T) -> T::Response {
+        fn receive_data<T: Receiver>(&mut self, mut receiver: T) -> T::Response {
             let mut data = [0];
             loop {
                 match if let Ok(len) = self.stream.read(&mut data) {
