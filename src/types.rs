@@ -107,6 +107,10 @@ impl Parameter {
         write!(buf.as_mut_slice(), "{:04}", self.0).expect("Parameter format failed");
         buf
     }
+
+    pub fn as_usize(&self) -> usize {
+        self.0 as usize
+    }
 }
 
 impl PartialEq<usize> for Parameter {
