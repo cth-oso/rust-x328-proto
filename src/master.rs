@@ -1,11 +1,12 @@
-use crate::buffer::Buffer;
-use crate::nom_parser::master::{parse_read_response, parse_write_reponse, ResponseToken};
-use crate::{Address, Parameter, Value};
+use ascii::AsciiChar::{BackSpace, ACK, ENQ, EOT, ETX, NAK, SOX};
+
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 
-use crate::slave::bcc;
-use ascii::AsciiChar::{BackSpace, ACK, ENQ, EOT, ETX, NAK, SOX};
+use crate::bcc;
+use crate::buffer::Buffer;
+use crate::nom_parser::master::{parse_read_response, parse_write_reponse, ResponseToken};
+use crate::types::{Address, Parameter, Value};
 
 type StateT = Box<MasterState>;
 

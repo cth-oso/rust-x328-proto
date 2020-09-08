@@ -281,14 +281,7 @@ where
 }
 
 fn bcc(s: &Buf) -> u8 {
-    let mut ret = 0;
-    for byte in s.bytes() {
-        ret ^= byte;
-    }
-    if ret < 0x20 {
-        ret += 0x20
-    }
-    ret
+    crate::bcc(s.as_bytes())
 }
 
 #[cfg(test)]

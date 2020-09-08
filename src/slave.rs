@@ -8,22 +8,11 @@ const ETX: u8 = AsciiChar::ETX.as_byte();
 const NAK: u8 = AsciiChar::NAK.as_byte();
 const STX: u8 = AsciiChar::SOX.as_byte();
 
+use crate::bcc;
 use crate::buffer::Buffer;
 use crate::nom_parser::slave::{parse_command, CommandToken};
+
 pub use crate::{Address, Parameter, Value};
-
-pub type OptionalAddress = Option<Address>;
-
-pub(crate) fn bcc(data: &[u8]) -> u8 {
-    let mut checksum: u8 = 0;
-    for byte in data {
-        checksum ^= *byte;
-    }
-    if checksum < 0x20 {
-        checksum += 0x20;
-    }
-    checksum
-}
 
 #[derive(Debug)]
 pub enum Command {

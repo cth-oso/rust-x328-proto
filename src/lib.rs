@@ -34,3 +34,15 @@ impl From<std::io::Error> for X328Error {
         X328Error::IOError
     }
 }
+
+/// Calculates the BCC checksum according to the X3.28 spec.
+pub(crate) fn bcc(data: &[u8]) -> u8 {
+    let mut checksum: u8 = 0;
+    for byte in data {
+        checksum ^= *byte;
+    }
+    if checksum < 0x20 {
+        checksum += 0x20;
+    }
+    checksum
+}
