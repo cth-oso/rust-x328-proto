@@ -14,8 +14,8 @@ fn master_main_loop() {
     // let mut registers: HashMap<Parameter, Value> = HashMap::new();
 
     let mut master = io::Master::new(&mut serial);
-    let addr10 = Address::new_unchecked(10);
-    let param20 = Parameter::new_unchecked(20);
+    let addr10 = Address::new(10).unwrap();
+    let param20 = Parameter::new(20).unwrap();
     let x = master
         .write_parameter(addr10, param20, 3)
         .expect_err("Should be transmission error, SOX received");

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::io::{self, Read, Write};
 
 use std::error::Error;
-use x328_proto::slave::Slave;
 use x328_proto::Address;
+use x328_proto::Slave;
 
 fn slave_main_loop() -> Result<(), Box<dyn Error>> {
     let mut registers = HashMap::new();

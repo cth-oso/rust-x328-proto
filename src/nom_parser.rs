@@ -10,9 +10,8 @@ use nom::IResult;
 
 use nom::combinator::{map, map_res, opt, peek, recognize, value, verify};
 
-use crate::{Address, Parameter, Value};
-
-use crate::{ParameterOffset, X328Error};
+use crate::types::{Address, Parameter, ParameterOffset, Value};
+use crate::X328Error;
 
 type Buf = str;
 
@@ -167,7 +166,7 @@ pub(crate) mod slave {
         #[test]
         fn test_address() {
             use slave::address;
-            assert_eq!(address("11223"), Ok(("3", Address::new_unchecked(12))));
+            assert_eq!(address("11223"), Ok(("3", Address::new(12).unwrap())));
             assert!(address("1132").is_err());
             assert!(address("aa22").is_err());
             assert_eq!(address("122"), incomplete!(1));
@@ -191,7 +190,7 @@ pub(crate) mod slave {
             }
 
             cmd.push(EOT);
-            push!(addr.to_string());
+            push!(addr.to_bytes());
             cmd.push(STX);
 
             assert_eq!(write!(), incomplete!(4));

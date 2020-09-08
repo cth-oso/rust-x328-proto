@@ -5,10 +5,21 @@ use std::str::FromStr;
 
 pub type Value = i32;
 
-#[derive(PartialEq, Eq, Debug, Copy, Clone, Hash)]
+/// Address is a range-checked [0, 99] integer, representing a node address.
+///
+/// ## Example
+/// ```
+/// use x328_proto::Address;
+/// use std::convert::TryInto;
+/// let addr = Address::new(10).unwrap();
+/// let addr: Address = 10.try_into().unwrap();
+/// ```
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone, Hash)]
+#[repr(transparent)]
 pub struct Address(u8);
 
 impl Address {
+    /// Create a new address, checking that the address is in [0,99].
     pub fn new(address: u8) -> Result<Address, X328Error> {
         if address <= 99 {
             Ok(Address(address))
@@ -17,13 +28,9 @@ impl Address {
         }
     }
 
-    pub fn new_unchecked(address: u8) -> Address {
-        Address::new(address).expect("Address out of range")
-    }
-
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self) -> [u8; 4] {
         use std::io::Write;
-        let mut buf = vec![0; 4];
+        let mut buf = [0; 4];
         write!(&mut buf[1..], "{:02}", self.0).expect("Address formatting failed");
         buf[0] = buf[1];
         buf[3] = buf[2];
@@ -68,29 +75,21 @@ impl FromStr for Address {
     }
 }
 
-impl ToString for Address {
-    fn to_string(&self) -> String {
-        String::from_utf8(self.to_bytes()).expect("Failed to construct address string")
-    }
-}
-
-#[derive(PartialEq, Eq, Debug, Copy, Clone, Hash)]
+/// Parameter is a range-checked [0,9999] integer, representing a node parameter.
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone, Hash)]
+#[repr(transparent)]
 pub struct Parameter(i16);
 pub(crate) type ParameterOffset = i16;
 
 impl Parameter {
     /// Create a new Parameter, checking that the given value
-    /// is in the range [0..9999].
+    /// is in the range [0, 9999].
     pub fn new(parameter: i16) -> Result<Parameter, X328Error> {
         if (0 <= parameter) && (parameter <= 9999) {
             Ok(Parameter(parameter))
         } else {
             Err(X328Error::InvalidParameter)
         }
-    }
-    /// Panics if parameter is outside of the range 0..9999
-    pub fn new_unchecked(parameter: i16) -> Parameter {
-        Parameter::new(parameter).expect("Parameter out of range")
     }
 
     pub(crate) fn checked_add(&self, offset: ParameterOffset) -> Result<Parameter, X328Error> {
@@ -101,10 +100,10 @@ impl Parameter {
         )
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
+    pub(crate) fn to_bytes(&self) -> [u8; 4] {
         use std::io::Write;
-        let mut buf = vec![0; 4];
-        write!(buf.as_mut_slice(), "{:04}", self.0).expect("Parameter format failed");
+        let mut buf = [0; 4];
+        write!(&mut buf[..], "{:04}", self.0).expect("Parameter format failed");
         buf
     }
 
@@ -162,12 +161,6 @@ impl FromStr for Parameter {
     }
 }
 
-impl ToString for Parameter {
-    fn to_string(&self) -> String {
-        String::from_utf8(self.to_bytes()).expect("Parameter to string failed")
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{Address, Parameter};
@@ -177,11 +170,11 @@ mod tests {
         let a87 = Address::new(87).unwrap();
         assert_eq!(a87, 87);
 
-        let str = a87.to_string();
-        assert_eq!(str, "8877");
+        let bytes = &a87.to_bytes();
+        assert_eq!(bytes, b"8877");
 
-        let a05 = Address::new_unchecked(5);
-        assert_eq!(a05.to_string(), "0055");
+        let a05 = Address::new(5).unwrap();
+        assert_eq!(&a05.to_bytes(), b"0055");
 
         assert_eq!("05".parse::<Address>().unwrap(), Address(5));
         assert_eq!("13".parse::<Address>().unwrap(), 13);
@@ -193,7 +186,7 @@ mod tests {
     fn test_parameter() {
         assert_eq!(Parameter::new(10).unwrap(), Parameter(10));
 
-        let p10 = Parameter::new_unchecked(10);
+        let p10 = Parameter::new(10).unwrap();
         assert_eq!(p10, 10); // usize comparison
         assert_eq!(p10.checked_add(10), Ok(Parameter(20)));
         assert_eq!(p10.checked_add(-10), Ok(Parameter(0)));
@@ -201,8 +194,8 @@ mod tests {
 
         assert!(Parameter(9999).checked_add(1).is_err());
 
-        let str = p10.to_string();
-        assert_eq!(str, "0010");
+        let str = &p10.to_bytes();
+        assert_eq!(str, b"0010");
 
         assert_eq!("0010".parse(), Ok(p10));
         assert_eq!("0100".parse(), Ok(Parameter(100)));

@@ -1,15 +1,22 @@
-use nom::lib::std::fmt::Formatter;
-use std::error::Error as StdError;
-use std::fmt;
+//! Sans-IO implementation of the ANSI X3.28 serial line protocol
+//!
+//! X3.28 is an old fieldbus protocol, commonly used on top of a RS-422 bus.
+//! The bus settings should be 9600 baud, 7 bit char, no flow control, even parity, 1 stop bit (7E1).
+//! Since this crate doesn't provide IO at all, feel free to use whatever transport you want.
+
+pub mod master;
+pub mod slave;
+
+pub use master::Master;
+pub use slave::Slave;
+pub use types::{Address, Parameter, Value};
 
 mod buffer;
-pub mod master;
 mod nom_parser;
-pub mod slave;
 mod types;
 
-pub(crate) use types::ParameterOffset;
-pub use types::{Address, Parameter, Value};
+use std::error::Error as StdError;
+use std::fmt::{self, Formatter};
 
 #[derive(Debug, PartialEq)]
 pub enum X328Error {
