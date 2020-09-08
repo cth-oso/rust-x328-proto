@@ -29,10 +29,10 @@ impl Address {
     }
 
     pub(crate) fn to_bytes(&self) -> [u8; 4] {
-        use std::io::Write;
         let mut buf = [0; 4];
-        write!(&mut buf[1..], "{:02}", self.0).expect("Address formatting failed");
-        buf[0] = buf[1];
+        buf[0] = 0x30 + self.0 / 10;
+        buf[1] = buf[0];
+        buf[2] = 0x30 + self.0 % 10;
         buf[3] = buf[2];
         buf
     }
@@ -101,9 +101,12 @@ impl Parameter {
     }
 
     pub(crate) fn to_bytes(&self) -> [u8; 4] {
-        use std::io::Write;
         let mut buf = [0; 4];
-        write!(&mut buf[..], "{:04}", self.0).expect("Parameter format failed");
+        let mut x = self.0;
+        for c in buf.iter_mut().rev() {
+            *c = 0x30 + (x % 10) as u8;
+            x /= 10;
+        }
         buf
     }
 
