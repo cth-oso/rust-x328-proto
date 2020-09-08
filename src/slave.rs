@@ -77,23 +77,22 @@ impl ReadData {
     fn parse_buffer(mut self) -> Slave {
         use CommandToken::*;
 
-        // Return early for zero-length buffers so we don't
-        // drop read_again_param before ReadAgain has a chance to match
-        if self.input_buffer.len() == 0 {
-            return self.need_data();
-        }
+        let (token, read_again_param) = loop {
+            match parse_command(self.input_buffer.as_str_slice()) {
+                (0, _) => return self.need_data(),
+                (consumed, token) => {
+                    self.input_buffer.consume(consumed);
+                    // Take the read again parameter from our state. It would be invalid
+                    // to use it for later tokens, that's why it's extracted in the loop.
+                    let read_again_param = self.state.read_again_param.take();
 
-        let (consumed, token) = parse_command(self.input_buffer.as_str_slice());
-        self.input_buffer.consume(consumed);
-
-        // Take the read again parameter from our state, for matching below.
-        // It would be invalid to use it for later tokens
-        let read_again_param = self.state.read_again_param.take();
-
-        // Skip this token and get another if we're not at the end of the buffer
-        if self.input_buffer.len() > 0 && consumed > 0 {
-            return self.parse_buffer();
-        }
+                    // We're done parsing when the buffer is empty
+                    if self.input_buffer.len() == 0 {
+                        break (token, read_again_param);
+                    }
+                }
+            };
+        };
 
         match token {
             ReadParameter(address, parameter) if address == self.state.address => {
@@ -110,7 +109,7 @@ impl ReadData {
                 }
             }
             InvalidPayload(address) if address == self.state.address => self.send_nak(),
-            _ => self.need_data(),
+            _ => self.need_data(), // This matches NeedData, and read/write to other addresses
         }
     }
 
