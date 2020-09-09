@@ -1,7 +1,7 @@
 use snafu::{ensure, Backtrace, OptionExt, Snafu};
 
 use std::cmp::Ordering;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::str::FromStr;
 
 pub type Value = i32;
@@ -81,6 +81,26 @@ impl Into<usize> for Address {
     }
 }
 
+pub trait IntoAddress: TryInto<Address> {
+    fn into_address(self) -> Result<Address, Error>;
+}
+
+impl IntoAddress for Address {
+    fn into_address(self) -> Result<Address, Error> {
+        Ok(self)
+    }
+}
+
+impl<T> IntoAddress for T
+where
+    T: TryInto<Address> + ToString + Clone,
+{
+    fn into_address(self) -> Result<Address, Error> {
+        let cpy = self.clone();
+        self.try_into().ok().with_context(|| invalid_address(cpy))
+    }
+}
+
 impl TryFrom<usize> for Address {
     type Error = Error;
 
@@ -153,6 +173,26 @@ impl PartialOrd<usize> for Parameter {
         } else {
             Some(self.0.cmp(&(*other as i16)))
         }
+    }
+}
+
+pub trait IntoParameter: TryInto<Parameter> {
+    fn into_parameter(self) -> Result<Parameter, Error>;
+}
+
+impl IntoParameter for Parameter {
+    fn into_parameter(self) -> Result<Parameter, Error> {
+        Ok(self)
+    }
+}
+
+impl<T> IntoParameter for T
+where
+    T: TryInto<Parameter> + ToString + Clone,
+{
+    fn into_parameter(self) -> Result<Parameter, Error> {
+        let cpy = self.clone();
+        self.try_into().ok().with_context(|| invalid_parameter(cpy))
     }
 }
 

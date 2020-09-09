@@ -3,7 +3,7 @@ mod common;
 use common::{SerialIOPlane, SerialInterface};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use x328_proto::{slave::Slave, Address, Parameter, Value};
+use x328_proto::{slave::Slave, Parameter, Value};
 
 #[test]
 fn slave_main_loop() {
@@ -12,7 +12,7 @@ fn slave_main_loop() {
     let mut serial = SerialIOPlane::new(&serial_sim);
     let mut registers: HashMap<Parameter, Value> = HashMap::new();
 
-    let mut slave_proto = Slave::new(Address::new(10).unwrap());
+    let mut slave_proto = Slave::new(10).unwrap();
 
     'main: loop {
         slave_proto = match slave_proto {

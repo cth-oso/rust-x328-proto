@@ -1,6 +1,5 @@
 mod common;
 
-use std::convert::TryInto;
 use std::io::{Read, Write};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::SeqCst;
@@ -19,30 +18,28 @@ fn master_main_loop(io: BusInterface) -> Result<(), master::io::Error> {
     for _ in 1..4 {
         for addr in 5..6 {
             println!("master send write");
-            let a = addr.try_into().unwrap();
-            match master.write_parameter(a, 20.try_into()?, 30 + addr as i32) {
+            match master.write_parameter(addr, 20, (30 + addr) as i32) {
                 Ok(()) => println!("master: write ok"),
                 Err(err) => println!("master: write error {:?}", err),
             }
 
-            match master.read_parameter(a, 20.try_into().unwrap()) {
+            match master.read_parameter(addr, 20) {
                 Ok(val) => println!("Master read param ok {}", val),
                 Err(err) => println!("Master read error {:?}", err),
             }
         }
     }
     // test read again
-    let a5 = 5.try_into().unwrap();
-    master.set_can_read_again(a5, true);
+    master.set_can_read_again(5, true);
     for _ in 0..10 {
-        assert!(master.read_parameter(a5, 25.try_into().unwrap()).is_ok());
+        assert!(master.read_parameter(5, 25).is_ok());
     }
     println!("Master terminating");
     Ok(())
 }
 
 fn slave_loop(mut serial: BusInterface) -> Result<(), slave::Error> {
-    let mut slave_proto = Slave::new(5.try_into()?);
+    let mut slave_proto = Slave::new(5)?;
     'main: loop {
         if SHUTDOWN.load(SeqCst) {
             break 'main;

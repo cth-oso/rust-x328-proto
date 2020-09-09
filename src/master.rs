@@ -270,7 +270,7 @@ pub mod io {
     use snafu::{Backtrace, ResultExt, Snafu};
 
     use crate::master::{ReadResponse, Receiver, ReceiverResult, SendData, WriteResponse};
-    use crate::types::{self, Address, Parameter, Value};
+    use crate::types::{self, IntoAddress, IntoParameter, Value};
 
     #[derive(Debug, Snafu)]
     pub enum Error {
@@ -309,22 +309,23 @@ pub mod io {
             }
         }
 
-        pub fn set_can_read_again(&mut self, address: Address, value: bool) {
+        pub fn set_can_read_again(&mut self, address: impl IntoAddress, value: bool) {
             self.idle_state
                 .as_mut()
                 .unwrap()
-                .set_slave_capabilites(address, value);
+                .set_slave_capabilites(address.into_address().unwrap(), value);
         }
 
         // Sends a write command to the slave. May use the shorter "write again" command form
         pub fn write_parameter(
             &mut self,
-            address: Address,
-            parameter: Parameter,
+            address: impl IntoAddress,
+            parameter: impl IntoParameter,
             value: Value,
         ) -> Result<(), Error> {
-            let idle_state = self.take_idle(); // self.idle_state must be Some at start of call
-            let data_out = idle_state.write_parameter(address, parameter, value);
+            let address = address.into_address()?;
+            let parameter = parameter.into_parameter()?;
+            let data_out = self.take_idle().write_parameter(address, parameter, value);
             let receiver = self.send_data(data_out)?;
             match self.receive_data(receiver) {
                 WriteResponse::WriteOk => Ok(()),
@@ -335,11 +336,12 @@ pub mod io {
 
         pub fn read_parameter(
             &mut self,
-            address: Address,
-            parameter: Parameter,
+            address: impl IntoAddress,
+            parameter: impl IntoParameter,
         ) -> Result<Value, Error> {
-            let idle = self.take_idle();
-            let send = idle.read_parameter(address, parameter);
+            let address = address.into_address()?;
+            let parameter = parameter.into_parameter()?;
+            let send = self.take_idle().read_parameter(address, parameter);
             let receiver = self.send_data(send)?;
             match self.receive_data(receiver) {
                 ReadResponse::Ok(value) => Ok(value),
@@ -386,6 +388,7 @@ pub mod io {
     }
 }
 
+/// Tests for the base sans-IO master implementation
 #[cfg(test)]
 mod tests {
     use super::*;

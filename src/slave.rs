@@ -15,7 +15,7 @@ use crate::bcc;
 use crate::buffer::Buffer;
 use crate::nom_parser::slave::{parse_command, CommandToken};
 
-use crate::types::{self, Address, Parameter, Value};
+use crate::types::{self, Address, IntoAddress, Parameter, Value};
 
 /// Slave part of the X3.28 protocol
 ///
@@ -26,14 +26,13 @@ use crate::types::{self, Address, Parameter, Value};
 /// # Example
 ///
 /// ```
-/// use x328_proto::{Address, Slave};
+/// use x328_proto::Slave;
 /// # use std::io::{Read, Write, Cursor};
 /// # fn connect_serial_interface() -> Result<Cursor<Vec<u8>>,  &'static str>
 /// # { Ok(Cursor::new(Vec::new())) }
 /// #
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// let my_address = Address::new(10)?;
-/// let mut slave_proto = Slave::new(my_address); // new protocol instance with address 10
+/// let mut slave_proto = Slave::new(10)?; // new protocol instance with address 10
 /// let mut serial = connect_serial_interface()?;
 ///
 /// 'main: loop {
@@ -97,8 +96,8 @@ impl Slave {
     /// let my_address = Address::new(10).unwrap();
     /// let mut slave_proto = Slave::new(my_address); // new protocol instance with address 10
     /// ```
-    pub fn new(address: Address) -> Slave {
-        ReadData::create(address)
+    pub fn new(address: impl IntoAddress) -> Result<Slave, Error> {
+        Ok(ReadData::create(address.into_address()?))
     }
 }
 

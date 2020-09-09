@@ -3,10 +3,17 @@
 use nom::lib::std::collections::VecDeque;
 use std::cell::RefCell;
 use std::cmp::min;
-use std::io::{Error, ErrorKind};
+use std::io::{Error, ErrorKind, Write};
 use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::Duration;
+
+pub mod bytes {
+    pub const STX: u8 = 2;
+    pub const ETX: u8 = 3;
+    pub const ACK: u8 = 6;
+    pub const NAK: u8 = 21;
+}
 
 pub struct SerialInterface {
     rx: Vec<u8>,
@@ -161,6 +168,10 @@ impl BusInterface {
             do_read_error: false,
             do_write_error: false,
         }
+    }
+
+    pub fn putc(&mut self, byte: u8) {
+        self.write(&[byte]).unwrap();
     }
 }
 

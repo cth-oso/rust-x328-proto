@@ -2,13 +2,12 @@ use std::collections::HashMap;
 use std::io::{self, Read, Write};
 
 use std::error::Error;
-use x328_proto::Address;
 use x328_proto::Slave;
 
 fn slave_main_loop() -> Result<(), Box<dyn Error>> {
     let mut registers = HashMap::new();
 
-    let mut slave_proto = Slave::new(Address::new(10).unwrap());
+    let mut slave_proto = Slave::new(10)?;
 
     loop {
         slave_proto = match slave_proto {
