@@ -3,7 +3,6 @@ mod common;
 use ascii::AsciiChar::{ACK, SOX};
 use common::*;
 use x328_proto::master::io;
-use x328_proto::X328Error;
 use x328_proto::{Address, Parameter};
 
 #[test]
@@ -16,14 +15,14 @@ fn master_main_loop() {
     let mut master = io::Master::new(&mut serial);
     let addr10 = Address::new(10).unwrap();
     let param20 = Parameter::new(20).unwrap();
-    let x = master
+    master
         .write_parameter(addr10, param20, 3)
         .expect_err("Should be transmission error, SOX received");
-    assert_eq!(x, X328Error::IOError);
     serial_sim.borrow_mut().trigger_write_error();
-    let x = master.write_parameter(addr10, param20, 3);
-    assert_eq!(x.unwrap_err(), X328Error::IOError);
+    master
+        .write_parameter(addr10, param20, 3)
+        .expect_err("Bus write error should have resulted in Error response");
     let x = master.write_parameter(addr10, param20, 3);
     println!("Write success: {:?}", x);
-    assert_eq!(x, Ok(()));
+    x.unwrap();
 }

@@ -15,32 +15,6 @@ mod buffer;
 mod nom_parser;
 mod types;
 
-use std::error::Error as StdError;
-use std::fmt::{self, Formatter};
-
-#[derive(Debug, PartialEq)]
-pub enum X328Error {
-    InvalidAddress,
-    InvalidParameter,
-    IOError,
-    OtherError,
-    InvalidDataReceived,
-    WriteNAK,
-}
-
-impl StdError for X328Error {}
-
-impl fmt::Display for X328Error {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
-impl From<std::io::Error> for X328Error {
-    fn from(_: std::io::Error) -> Self {
-        X328Error::IOError
-    }
-}
 
 /// Calculates the BCC checksum according to the X3.28 spec.
 pub(crate) fn bcc(data: &[u8]) -> u8 {

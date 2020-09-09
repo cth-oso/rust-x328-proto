@@ -1,4 +1,5 @@
 use ascii::AsciiChar::{BackSpace, ACK, ENQ, EOT, ETX, NAK, SOX};
+use snafu::Snafu;
 
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
@@ -6,9 +7,16 @@ use std::marker::PhantomData;
 use crate::bcc;
 use crate::buffer::Buffer;
 use crate::nom_parser::master::{parse_read_response, parse_write_reponse, ResponseToken};
-use crate::types::{Address, Parameter, Value};
+use crate::types::{self, Address, Parameter, Value};
 
 type StateT = Box<MasterState>;
+
+#[derive(Debug, Snafu)]
+#[non_exhaustive]
+pub enum Error {
+    #[snafu(display("Invalid argument {}", source), context(false))]
+    InvalidArgument { source: types::Error },
+}
 
 pub struct MasterState {
     read_again: Option<(Address, Parameter)>,
@@ -259,8 +267,27 @@ impl Receiver for ReceiveReadResponse {
 }
 
 pub mod io {
+    use snafu::{Backtrace, ResultExt, Snafu};
+
     use crate::master::{ReadResponse, Receiver, ReceiverResult, SendData, WriteResponse};
-    use crate::{Address, Parameter, Value, X328Error};
+    use crate::types::{self, Address, Parameter, Value};
+
+    #[derive(Debug, Snafu)]
+    pub enum Error {
+        #[snafu(display("Invalid argument given: {}", source), context(false))]
+        InvalidArgument { source: types::Error },
+        #[snafu(display("X3.28 invalid parameter"))]
+        InvalidParameter { backtrace: Backtrace },
+        #[snafu(display("X3.28 write received NAK response"))]
+        WriteNAK { backtrace: Backtrace },
+        #[snafu(display("X3.28 error: bad transmission."))]
+        BusDataError { backtrace: Backtrace },
+        #[snafu(display("X3.28 IO error: {}", source))]
+        IOError {
+            source: std::io::Error,
+            backtrace: Backtrace,
+        },
+    }
 
     #[derive(Debug)]
     pub struct Master<IO>
@@ -295,14 +322,14 @@ pub mod io {
             address: Address,
             parameter: Parameter,
             value: Value,
-        ) -> Result<(), X328Error> {
+        ) -> Result<(), Error> {
             let idle_state = self.take_idle(); // self.idle_state must be Some at start of call
             let data_out = idle_state.write_parameter(address, parameter, value);
             let receiver = self.send_data(data_out)?;
             match self.receive_data(receiver) {
                 WriteResponse::WriteOk => Ok(()),
-                WriteResponse::WriteFailed => Err(X328Error::WriteNAK),
-                WriteResponse::TransmissionError => Err(X328Error::IOError),
+                WriteResponse::WriteFailed => WriteNAK {}.fail(),
+                WriteResponse::TransmissionError => BusDataError {}.fail(),
             }
         }
 
@@ -310,29 +337,30 @@ pub mod io {
             &mut self,
             address: Address,
             parameter: Parameter,
-        ) -> Result<Value, X328Error> {
+        ) -> Result<Value, Error> {
             let idle = self.take_idle();
             let send = idle.read_parameter(address, parameter);
             let receiver = self.send_data(send)?;
             match self.receive_data(receiver) {
                 ReadResponse::Ok(value) => Ok(value),
-                ReadResponse::InvalidParameter => Err(X328Error::InvalidParameter),
-                ReadResponse::TransmissionError => Err(X328Error::IOError),
+                ReadResponse::InvalidParameter => InvalidParameter {}.fail(),
+                ReadResponse::TransmissionError => BusDataError {}.fail(),
             }
         }
 
-        fn send_data<T: Receiver>(&mut self, sender: SendData<T>) -> Result<T, X328Error> {
-            if self
+        fn send_data<T: Receiver>(&mut self, sender: SendData<T>) -> Result<T, Error> {
+            match self
                 .stream
                 .write_all(sender.as_slice())
                 .and_then(|_| self.stream.flush())
-                .is_ok()
             {
-                Ok(sender.data_sent())
-            } else {
-                self.idle_state = Some(sender.send_failed());
-                Err(X328Error::IOError)
+                Ok(_) => Ok(sender.data_sent()),
+                Err(err) => {
+                    self.idle_state = Some(sender.send_failed());
+                    Err(err)
+                }
             }
+            .context(IOError {})
         }
 
         fn receive_data<T: Receiver>(&mut self, mut receiver: T) -> T::Response {
@@ -361,11 +389,10 @@ pub mod io {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::X328Error;
     use std::convert::TryInto;
 
     #[test]
-    fn write_parameter() -> Result<(), X328Error> {
+    fn write_parameter() -> Result<(), Error> {
         let x = Master::new().write_parameter(43.try_into()?, 1234.try_into()?, 56);
         // println!("{}", String::from_utf8(x.as_slice().to_vec()).unwrap());
         assert_eq!(x.as_slice(), b"\x044433\x02123400056\x034");
@@ -373,7 +400,7 @@ mod tests {
     }
 
     #[test]
-    fn read_parameter() -> Result<(), X328Error> {
+    fn read_parameter() -> Result<(), Error> {
         let x = Master::new().read_parameter(43.try_into()?, 1234.try_into()?);
         // println!("{}", String::from_utf8(x.as_slice().to_vec()).unwrap());
         assert_eq!(x.as_slice(), b"\x0444331234\x05");
@@ -381,7 +408,7 @@ mod tests {
     }
 
     #[test]
-    fn read_again() -> Result<(), X328Error> {
+    fn read_again() -> Result<(), Error> {
         let mut idle = Master::new();
         let addr = Address::new(10)?;
         let param = Parameter::new(20)?;

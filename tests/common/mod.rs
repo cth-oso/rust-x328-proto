@@ -7,7 +7,6 @@ use std::io::{Error, ErrorKind};
 use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::time::Duration;
-use x328_proto::X328Error;
 
 pub struct SerialInterface {
     rx: Vec<u8>,
@@ -50,7 +49,7 @@ impl std::io::Read for SerialIOPlane {
         let mut inner = self.0.borrow_mut();
         if inner.do_read_error {
             inner.do_read_error = false;
-            Err(Error::new(ErrorKind::PermissionDenied, X328Error::IOError))
+            Err(Error::new(ErrorKind::PermissionDenied, "IO read error"))
         } else {
             let old_pos = inner.rx_pos;
             inner.rx_pos = min(old_pos + buf.len(), inner.rx.len());
@@ -66,7 +65,7 @@ impl std::io::Write for SerialIOPlane {
         let mut inner = self.0.borrow_mut();
         if inner.do_write_error {
             inner.do_write_error = false;
-            Err(Error::new(ErrorKind::PermissionDenied, X328Error::IOError))
+            Err(Error::new(ErrorKind::PermissionDenied, "IO write error"))
         } else {
             inner.tx.write(buf)
         }
@@ -169,7 +168,7 @@ impl std::io::Read for BusInterface {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         if self.do_read_error {
             self.do_read_error = false;
-            return Err(Error::new(ErrorKind::PermissionDenied, X328Error::IOError));
+            return Err(Error::new(ErrorKind::PermissionDenied, "IO read error"));
         }
 
         let mut rx = if self.blocking_read {
@@ -178,7 +177,7 @@ impl std::io::Read for BusInterface {
             self.link
                 .rx
                 .try_lock()
-                .map_err(|_| Error::new(ErrorKind::WouldBlock, X328Error::IOError))?
+                .map_err(|_| Error::new(ErrorKind::WouldBlock, "IO read error: would block"))?
         };
 
         loop {
@@ -196,7 +195,7 @@ impl std::io::Read for BusInterface {
                             .expect("Mutex lock failed");
                         rx = x.0;
                         if rx.is_empty() {
-                            return Err(Error::new(ErrorKind::TimedOut, X328Error::IOError));
+                            return Err(Error::new(ErrorKind::TimedOut, "IO read timeout"));
                         }
                     } else {
                         return Ok(0);
@@ -211,7 +210,7 @@ impl std::io::Write for BusInterface {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         if self.do_write_error {
             self.do_write_error = false;
-            Err(Error::new(ErrorKind::PermissionDenied, X328Error::IOError))
+            Err(Error::new(ErrorKind::PermissionDenied, "IO write error"))
         } else {
             for byte in buf {
                 if self.link.is_master {

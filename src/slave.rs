@@ -1,6 +1,7 @@
 //! See Slave for more details.
 
 use ascii::AsciiChar;
+use snafu::Snafu;
 
 const ACK: u8 = AsciiChar::ACK.as_byte();
 // const BS: u8 = AsciiChar::BackSpace.as_byte();
@@ -14,7 +15,7 @@ use crate::bcc;
 use crate::buffer::Buffer;
 use crate::nom_parser::slave::{parse_command, CommandToken};
 
-use crate::{Address, Parameter, Value};
+use crate::types::{self, Address, Parameter, Value};
 
 /// Slave part of the X3.28 protocol
 ///
@@ -99,6 +100,13 @@ impl Slave {
     pub fn new(address: Address) -> Slave {
         ReadData::create(address)
     }
+}
+
+#[derive(Debug, Snafu)]
+#[non_exhaustive]
+pub enum Error {
+    #[snafu(display("Invalid argument {}", source), context(false))]
+    InvalidArgument { source: types::Error },
 }
 
 type SlaveState = Box<SlaveStateStruct>;

@@ -1,19 +1,29 @@
 use ascii::AsciiChar::{self, BackSpace, ACK, ENQ, EOT, ETX, NAK, SOX as STX};
-
-use nom::error::ParseError;
-use nom::Err::Incomplete;
+use snafu::{ensure, Backtrace, Snafu};
 
 use nom::branch::alt;
 use nom::bytes::streaming::{take, take_while, take_while_m_n};
+use nom::combinator::{map, map_res, opt, peek, recognize, value, verify};
+use nom::error::ParseError;
 use nom::sequence::{pair, preceded, terminated, tuple};
+use nom::Err::Incomplete;
 use nom::IResult;
 
-use nom::combinator::{map, map_res, opt, peek, recognize, value, verify};
-
-use crate::types::{Address, Parameter, ParameterOffset, Value};
-use crate::X328Error;
+use crate::types::{self, Address, Parameter, ParameterOffset, Value};
 
 type Buf = str;
+
+#[derive(Debug, Snafu)]
+#[non_exhaustive]
+pub enum Error {
+    #[snafu(display("Invalid type {}", source), context(false))]
+    InvalidType { source: types::Error },
+    #[snafu(display("Invalid address {}", address))]
+    InvalidAddress {
+        address: String,
+        backtrace: Backtrace,
+    },
+}
 
 pub(crate) mod master {
     use super::*;
@@ -125,14 +135,16 @@ pub(crate) mod slave {
     }
 
     fn address(buf: &Buf) -> IResult<&Buf, Address> {
-        map_res(
+        map_res::<_, _, _, _, Error, _, _>(
             take_while_m_n(4, 4, |c: char| c.is_ascii_digit()),
             |x: &str| {
-                if x[0..1] == x[1..2] && x[2..3] == x[3..] {
-                    Ok(x[1..3].parse::<Address>()?)
-                } else {
-                    Err(X328Error::InvalidAddress)
-                }
+                ensure!(
+                    x[0..1] == x[1..2] && x[2..3] == x[3..],
+                    InvalidAddress {
+                        address: x.to_owned()
+                    }
+                );
+                Ok(x[1..3].parse::<Address>()?)
             },
         )(buf)
     }

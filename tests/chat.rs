@@ -1,5 +1,4 @@
 mod common;
-use common::{BusInterface, RS422Bus};
 
 use std::convert::TryInto;
 use std::io::{Read, Write};
@@ -7,9 +6,14 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::SeqCst;
 use std::thread;
 use std::time::Duration;
-use x328_proto::{master::io::Master, slave::Slave, X328Error};
 
-fn master_main_loop(io: BusInterface) -> Result<(), X328Error> {
+use x328_proto::master;
+use x328_proto::master::io::Master;
+use x328_proto::slave::{self, Slave};
+
+use common::{BusInterface, RS422Bus};
+
+fn master_main_loop(io: BusInterface) -> Result<(), master::io::Error> {
     let mut master = Master::new(io);
 
     for _ in 1..4 {
@@ -37,7 +41,7 @@ fn master_main_loop(io: BusInterface) -> Result<(), X328Error> {
     Ok(())
 }
 
-fn slave_loop(mut serial: BusInterface) -> Result<(), X328Error> {
+fn slave_loop(mut serial: BusInterface) -> Result<(), slave::Error> {
     let mut slave_proto = Slave::new(5.try_into()?);
     'main: loop {
         if SHUTDOWN.load(SeqCst) {
