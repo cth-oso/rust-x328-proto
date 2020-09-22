@@ -9,8 +9,6 @@ use crate::buffer::Buffer;
 use crate::nom_parser::master::{parse_read_response, parse_write_reponse, ResponseToken};
 use crate::types::{self, Address, Parameter, Value};
 
-type StateT = Box<MasterState>;
-
 #[derive(Debug, Snafu)]
 #[non_exhaustive]
 pub enum Error {
@@ -18,52 +16,51 @@ pub enum Error {
     InvalidArgument { source: types::Error },
 }
 
-pub struct MasterState {
+#[derive(Copy, Clone)]
+struct SlaveState {
+    can_read_again: bool,
+}
+
+pub struct Master {
     read_again: Option<(Address, Parameter)>,
     read_in_progress: Option<(Address, Parameter)>,
     slaves: [SlaveState; 100],
 }
 
-impl Debug for MasterState {
+impl Debug for Master {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "MasterState {{ read_again: {:?}, slaves: [..]}}",
-            self.read_again
+            "Master {{ read_again: {:?}, read_in_progress: {:?}, slaves: [..]}}",
+            self.read_again, self.read_in_progress
         )
     }
 }
 
-#[derive(Copy, Clone)]
-pub struct SlaveState {
-    can_read_again: bool,
-}
-
-#[derive(Debug)]
-pub struct Master {
-    state: StateT,
+impl Default for Master {
+    fn default() -> Self {
+        Master::new()
+    }
 }
 
 impl Master {
     pub fn new() -> Master {
         Master {
-            state: Box::new(MasterState {
-                read_again: None,
-                read_in_progress: None,
-                slaves: [SlaveState {
-                    can_read_again: false,
-                }; 100],
-            }),
+            read_again: None,
+            read_in_progress: None,
+            slaves: [SlaveState {
+                can_read_again: false,
+            }; 100],
         }
     }
 
     pub fn write_parameter(
-        mut self,
+        &mut self,
         address: Address,
         parameter: Parameter,
         value: Value,
-    ) -> SendData<ReceiveWriteResponse> {
-        self.state.read_again = None;
+    ) -> SendData<ReceiveWriteResponse<'_>> {
+        self.read_again = None;
         let mut data = Vec::with_capacity(20);
         data.push(EOT.as_byte());
         data.extend_from_slice(&address.to_bytes());
@@ -72,11 +69,11 @@ impl Master {
         data.extend_from_slice(format!("{:05}", value).as_bytes());
         data.push(ETX.as_byte());
         data.push(bcc(&data[6..]));
-        SendData::new(self.state, data)
+        SendData::new(self, data)
     }
 
     pub fn read_parameter(
-        mut self,
+        &mut self,
         address: Address,
         parameter: Parameter,
     ) -> SendData<ReceiveReadResponse> {
@@ -89,12 +86,12 @@ impl Master {
             data.extend_from_slice(&parameter.to_bytes());
             data.push(ENQ.as_byte());
         }
-        self.state.read_in_progress = Some((address, parameter));
-        SendData::new(self.state, data)
+        self.read_in_progress = Some((address, parameter));
+        SendData::new(self, data)
     }
 
     fn read_again(&mut self, address: Address, parameter: Parameter) -> Option<u8> {
-        let (old_addr, old_param) = self.state.read_again.take()?;
+        let (old_addr, old_param) = self.read_again.take()?;
         if old_addr == address && self.get_slave_capabilites(address).can_read_again {
             let (new, old): (i16, i16) = (parameter.into(), old_param.into());
             match new - old {
@@ -109,38 +106,25 @@ impl Master {
     }
 
     pub fn set_slave_capabilites(&mut self, address: Address, can_read_again: bool) {
-        self.state.slaves[address.as_usize()] = SlaveState { can_read_again };
+        self.slaves[address.as_usize()] = SlaveState { can_read_again };
     }
 
     fn get_slave_capabilites(&self, address: Address) -> SlaveState {
-        self.state.slaves[address.as_usize()]
-    }
-}
-
-impl Default for Master {
-    fn default() -> Self {
-        Master::new()
-    }
-}
-
-impl From<StateT> for Master {
-    fn from(mut state: StateT) -> Self {
-        state.read_in_progress = None;
-        Master { state }
+        self.slaves[address.as_usize()]
     }
 }
 
 #[derive(Debug)]
-pub struct SendData<R: Receiver> {
-    state: StateT,
+pub struct SendData<'a, R: Receiver<'a>> {
+    master: &'a mut Master,
     data: Vec<u8>,
     receiver: PhantomData<R>,
 }
 
-impl<R: Receiver> SendData<R> {
-    fn new(state: StateT, data: Vec<u8>) -> Self {
+impl<'a, R: Receiver<'a>> SendData<'a, R> {
+    fn new(master: &'a mut Master, data: Vec<u8>) -> Self {
         SendData {
-            state,
+            master,
             data,
             receiver: PhantomData,
         }
@@ -151,25 +135,24 @@ impl<R: Receiver> SendData<R> {
     }
 
     pub fn data_sent(self) -> R {
-        R::new(self.state)
+        R::new(self.master)
     }
 
-    pub fn send_failed(mut self) -> Master {
-        self.state.read_again = None;
-        self.state.read_in_progress = None;
-        Master::from(self.state)
+    pub fn send_failed(mut self) {
+        self.master.read_again = None;
+        self.master.read_in_progress = None;
     }
 }
 
 #[derive(Debug)]
 pub enum ReceiverResult<R, T> {
     NeedData(R),
-    Done(Master, T),
+    Done(T),
 }
 
-pub trait Receiver: Sized {
+pub trait Receiver<'a>: Sized {
     type Response;
-    fn new(state: StateT) -> Self;
+    fn new(master: &'a mut Master) -> Self;
     fn receive_data(self, data: &[u8]) -> ReceiverResult<Self, Self::Response>;
 }
 
@@ -181,35 +164,36 @@ pub enum WriteResponse {
 }
 
 #[derive(Debug)]
-pub struct ReceiveWriteResponse {
-    state: StateT,
+pub struct ReceiveWriteResponse<'a> {
+    master: &'a Master,
     buffer: Buffer,
 }
 
-impl Receiver for ReceiveWriteResponse {
+impl<'b> Receiver<'b> for ReceiveWriteResponse<'b> {
     type Response = WriteResponse;
-    fn new(state: StateT) -> ReceiveWriteResponse {
+    fn new(master: &'b mut Master) -> ReceiveWriteResponse<'b> {
         ReceiveWriteResponse {
-            state,
+            master,
             buffer: Buffer::new(),
         }
     }
 
-    fn receive_data(mut self, data: &[u8]) -> ReceiverResult<ReceiveWriteResponse, Self::Response> {
+    fn receive_data(
+        mut self,
+        data: &[u8],
+    ) -> ReceiverResult<ReceiveWriteResponse<'b>, Self::Response> {
         use ResponseToken::*;
 
         if data.is_empty() {
-            return ReceiverResult::Done(self.state.into(), WriteResponse::TransmissionError);
+            return ReceiverResult::Done(WriteResponse::TransmissionError);
         }
         self.buffer.write(data);
 
         match parse_write_reponse(self.buffer.as_str_slice()) {
             NeedData => ReceiverResult::NeedData(self),
-            WriteOk => ReceiverResult::Done(self.state.into(), WriteResponse::WriteOk),
-            WriteFailed | InvalidParameter => {
-                ReceiverResult::Done(self.state.into(), WriteResponse::WriteFailed)
-            }
-            _ => ReceiverResult::Done(self.state.into(), WriteResponse::TransmissionError),
+            WriteOk => ReceiverResult::Done(WriteResponse::WriteOk),
+            WriteFailed | InvalidParameter => ReceiverResult::Done(WriteResponse::WriteFailed),
+            _ => ReceiverResult::Done(WriteResponse::TransmissionError),
         }
     }
 }
@@ -222,26 +206,29 @@ pub enum ReadResponse {
 }
 
 #[derive(Debug)]
-pub struct ReceiveReadResponse {
-    state: StateT,
+pub struct ReceiveReadResponse<'a> {
+    master: &'a mut Master,
     buffer: Buffer,
 }
 
-impl Receiver for ReceiveReadResponse {
+impl<'b> Receiver<'b> for ReceiveReadResponse<'b> {
     type Response = ReadResponse;
-    fn new(state: StateT) -> ReceiveReadResponse {
+    fn new(master: &'b mut Master) -> ReceiveReadResponse<'b> {
         ReceiveReadResponse {
-            state,
+            master,
             buffer: Buffer::new(),
         }
     }
 
-    fn receive_data(mut self, data: &[u8]) -> ReceiverResult<ReceiveReadResponse, Self::Response> {
+    fn receive_data(
+        mut self,
+        data: &[u8],
+    ) -> ReceiverResult<ReceiveReadResponse<'b>, Self::Response> {
         use ReceiverResult::Done;
         use ResponseToken::*;
 
         if data.is_empty() {
-            return ReceiverResult::Done(self.state.into(), ReadResponse::TransmissionError);
+            return ReceiverResult::Done(ReadResponse::TransmissionError);
         }
 
         self.buffer.write(data);
@@ -251,17 +238,17 @@ impl Receiver for ReceiveReadResponse {
             ReadOK { parameter, value }
                 if (parameter
                     == self
-                        .state
+                        .master
                         .read_in_progress
                         .expect("read_in_progress is None while running read query!")
                         .1) =>
             {
-                self.state.read_again = self.state.read_in_progress;
-                debug_assert!(self.state.read_again.is_some());
-                Done(self.state.into(), ReadResponse::Ok(value))
+                self.master.read_again = self.master.read_in_progress;
+                debug_assert!(self.master.read_again.is_some());
+                Done(ReadResponse::Ok(value))
             }
-            InvalidParameter => Done(self.state.into(), ReadResponse::InvalidParameter),
-            _ => Done(self.state.into(), ReadResponse::TransmissionError),
+            InvalidParameter => Done(ReadResponse::InvalidParameter),
+            _ => Done(ReadResponse::TransmissionError),
         }
     }
 }
@@ -294,7 +281,7 @@ pub mod io {
     where
         IO: std::io::Read + std::io::Write,
     {
-        idle_state: Option<super::Master>,
+        proto: super::Master,
         stream: IO,
     }
 
@@ -304,15 +291,13 @@ pub mod io {
     {
         pub fn new(io: IO) -> Master<IO> {
             Master {
-                idle_state: super::Master::new().into(),
+                proto: super::Master::new(),
                 stream: io,
             }
         }
 
         pub fn set_can_read_again(&mut self, address: impl IntoAddress, value: bool) {
-            self.idle_state
-                .as_mut()
-                .unwrap()
+            self.proto
                 .set_slave_capabilites(address.into_address().unwrap(), value);
         }
 
@@ -325,9 +310,9 @@ pub mod io {
         ) -> Result<(), Error> {
             let address = address.into_address()?;
             let parameter = parameter.into_parameter()?;
-            let data_out = self.take_idle().write_parameter(address, parameter, value);
-            let receiver = self.send_data(data_out)?;
-            match self.receive_data(receiver) {
+            let data_out = self.proto.write_parameter(address, parameter, value);
+            let receiver = self.stream.send_data(data_out)?;
+            match self.stream.receive_data(receiver) {
                 WriteResponse::WriteOk => Ok(()),
                 WriteResponse::WriteFailed => WriteNAK {}.fail(),
                 WriteResponse::TransmissionError => BusDataError {}.fail(),
@@ -341,49 +326,53 @@ pub mod io {
         ) -> Result<Value, Error> {
             let address = address.into_address()?;
             let parameter = parameter.into_parameter()?;
-            let send = self.take_idle().read_parameter(address, parameter);
-            let receiver = self.send_data(send)?;
-            match self.receive_data(receiver) {
+            let send = self.proto.read_parameter(address, parameter);
+            let receiver = self.stream.send_data(send)?;
+            match self.stream.receive_data(receiver) {
                 ReadResponse::Ok(value) => Ok(value),
                 ReadResponse::InvalidParameter => InvalidParameter {}.fail(),
                 ReadResponse::TransmissionError => BusDataError {}.fail(),
             }
         }
+    } // impl Master
 
-        fn send_data<T: Receiver>(&mut self, sender: SendData<T>) -> Result<T, Error> {
-            match self
-                .stream
-                .write_all(sender.as_slice())
-                .and_then(|_| self.stream.flush())
-            {
-                Ok(_) => Ok(sender.data_sent()),
-                Err(err) => {
-                    self.idle_state = Some(sender.send_failed());
-                    Err(err)
-                }
-            }
-            .context(IOError {})
-        }
+    trait MasterTRX: std::io::Read + std::io::Write {
+        fn receive_data<'a, T: Receiver<'a>>(&mut self, receiver: T) -> T::Response;
+        fn send_data<'a, T: Receiver<'a>>(&mut self, sender: SendData<'a, T>) -> Result<T, Error>;
+    }
 
-        fn receive_data<T: Receiver>(&mut self, mut receiver: T) -> T::Response {
+    impl<T> MasterTRX for T
+    where
+        T: std::io::Read + std::io::Write,
+    {
+        fn receive_data<'a, R: Receiver<'a>>(
+            &mut self,
+            mut receiver: R,
+        ) -> <R as Receiver<'a>>::Response {
             let mut data = [0];
             loop {
-                match if let Ok(len) = self.stream.read(&mut data) {
-                    receiver.receive_data(&data[..len])
+                match if let Ok(len) = self.read(&mut data) {
+                    receiver.receive_data(&data[..len]) // FIXME: stop reading when Ok(0) is returned
                 } else {
                     receiver.receive_data(&[] as &[u8])
                 } {
                     ReceiverResult::NeedData(new_receiver) => receiver = new_receiver,
-                    ReceiverResult::Done(idle, resp) => {
-                        self.idle_state = Some(idle);
+                    ReceiverResult::Done(resp) => {
                         return resp;
                     }
                 };
             }
         }
 
-        fn take_idle(&mut self) -> super::Master {
-            self.idle_state.take().unwrap()
+        fn send_data<'a, R: Receiver<'a>>(&mut self, sender: SendData<'a, R>) -> Result<R, Error> {
+            match self.write_all(sender.as_slice()).and_then(|_| self.flush()) {
+                Ok(_) => Ok(sender.data_sent()),
+                Err(err) => {
+                    sender.send_failed();
+                    Err(err)
+                }
+            }
+            .context(IOError {})
         }
     }
 }
@@ -396,7 +385,8 @@ mod tests {
 
     #[test]
     fn write_parameter() -> Result<(), Error> {
-        let x = Master::new().write_parameter(43.try_into()?, 1234.try_into()?, 56);
+        let mut master = Master::new();
+        let x = master.write_parameter(43.try_into()?, 1234.try_into()?, 56);
         // println!("{}", String::from_utf8(x.as_slice().to_vec()).unwrap());
         assert_eq!(x.as_slice(), b"\x044433\x02123400056\x034");
         Ok(())
@@ -404,7 +394,8 @@ mod tests {
 
     #[test]
     fn read_parameter() -> Result<(), Error> {
-        let x = Master::new().read_parameter(43.try_into()?, 1234.try_into()?);
+        let mut master = Master::new();
+        let x = master.read_parameter(43.try_into()?, 1234.try_into()?);
         // println!("{}", String::from_utf8(x.as_slice().to_vec()).unwrap());
         assert_eq!(x.as_slice(), b"\x0444331234\x05");
         Ok(())
@@ -416,7 +407,7 @@ mod tests {
         let addr = Address::new(10)?;
         let param = Parameter::new(20)?;
         idle.set_slave_capabilites(addr, true);
-        idle.state.read_again = Some((addr, param));
+        idle.read_again = Some((addr, param));
         let send = idle.read_parameter(addr, param.checked_add(1)?);
         assert_eq!(send.as_slice(), [ACK.as_byte()]);
         Ok(())
