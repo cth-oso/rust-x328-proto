@@ -99,6 +99,17 @@ impl Slave {
     pub fn new(address: impl IntoAddress) -> Result<Slave, Error> {
         Ok(ReceiveData::create(address.into_address()?))
     }
+
+    /// Do not send any reply to the master. Transition to the idle ReceiveData state instead.
+    /// You really shouldn't do this, since this will leave the master waiting until it times out.
+    pub fn no_reply(self) -> Slave {
+        let state = match self {
+            Slave::ReceiveData(ReceiveData { state, .. }) => state,
+            Slave::SendData(SendData { state, .. }) => state,
+            Slave::ReadParameter(ReadParam { state, .. }) => state,
+            Slave::WriteParameter(WriteParam { state, .. }) => state,
+        };
+        ReceiveData::from_state(state)
     }
 }
 
@@ -275,6 +286,12 @@ impl ReadParam {
         SendData::from_state(self.state, vec![EOT])
     }
 
+    /// Do not send any reply to the master. Transition to the idle ReceiveData state instead.
+    /// You really shouldn't do this, since this will leave the master waiting until it times out.
+    pub fn no_reply(self) -> Slave {
+        ReceiveData::from_state(self.state)
+    }
+
     /// Get the address the request was sent to.
     pub fn address(&self) -> Address {
         self.address
@@ -318,6 +335,12 @@ impl WriteParam {
     /// us from setting the parameter to the given value.
     pub fn write_error(self) -> Slave {
         SendData::nak_from_state(self.state)
+    }
+
+    /// Do not send any reply to the master. Transition to the idle ReceiveData state instead.
+    /// You really shouldn't do this, since this will leave the master waiting until it times out.
+    pub fn no_reply(self) -> Slave {
+        ReceiveData::from_state(self.state)
     }
 
     /// The address the write request was sent to.
