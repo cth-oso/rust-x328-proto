@@ -114,7 +114,7 @@ type SlaveState = Box<SlaveStateStruct>;
 #[derive(Debug)]
 struct SlaveStateStruct {
     address: Address,
-    read_again_param: Option<Parameter>,
+    read_again_param: Option<(Address, Parameter)>,
 }
 
 impl SlaveStateStruct {}
@@ -174,15 +174,15 @@ impl ReceiveData {
         };
 
         match token {
-            ReadParameter(address, parameter) if address == self.state.address => {
-                ReadParam::from_state(self.state, parameter)
+            ReadParameter(address, parameter) if self.for_us(address) => {
+                ReadParam::from_state(self.state, address, parameter)
             }
-            WriteParameter(address, parameter, value) if address == self.state.address => {
-                WriteParam::from_state(self.state, parameter, value)
+            WriteParameter(address, parameter, value) if self.for_us(address) => {
+                WriteParam::from_state(self.state, address, parameter, value)
             }
             ReadAgain(offset) if read_again_param.is_some() => {
-                if let Ok(next_param) = read_again_param.unwrap().checked_add(offset) {
-                    ReadParam::from_state(self.state, next_param)
+                if let Ok(next_param) = read_again_param.unwrap().1.checked_add(offset) {
+                    ReadParam::from_state(self.state, read_again_param.unwrap().0, next_param)
                 } else {
                     SendData::from_state(self.state, vec![EOT])
                 }
@@ -198,6 +198,10 @@ impl ReceiveData {
 
     fn send_nak(self) -> Slave {
         SendData::from_state(self.state, vec![NAK])
+    }
+
+    fn for_us(&self, address: Address) -> bool {
+        self.state.address == address || self.state.address == 0
     }
 }
 
@@ -235,18 +239,23 @@ impl SendData {
 #[derive(Debug)]
 pub struct ReadParam {
     state: SlaveState,
+    address: Address,
     parameter: Parameter,
 }
 
 impl ReadParam {
-    fn from_state(state: SlaveState, parameter: Parameter) -> Slave {
-        Slave::ReadParameter(ReadParam { state, parameter })
+    fn from_state(state: SlaveState, address: Address, parameter: Parameter) -> Slave {
+        Slave::ReadParameter(ReadParam {
+            state,
+            address,
+            parameter,
+        })
     }
 
     /// Send a response to the master with the value of
     /// the parameter in the read request.
     pub fn send_reply_ok(mut self, value: Value) -> Slave {
-        self.state.read_again_param = Some(self.parameter);
+        self.state.read_again_param = Some((self.address, self.parameter));
 
         let value = format!("{:+06}", value);
         assert_eq!(value.len(), 6);
@@ -266,10 +275,9 @@ impl ReadParam {
         SendData::from_state(self.state, vec![EOT])
     }
 
-    /// Get the address the request was sent to. This is always our address,
-    /// bar programming error.
+    /// Get the address the request was sent to.
     pub fn address(&self) -> Address {
-        self.state.address
+        self.address
     }
 
     /// The parameter whose value is to be returned.
@@ -281,14 +289,21 @@ impl ReadParam {
 #[derive(Debug)]
 pub struct WriteParam {
     state: SlaveState,
+    address: Address,
     parameter: Parameter,
     value: Value,
 }
 
 impl WriteParam {
-    fn from_state(state: SlaveState, parameter: Parameter, value: Value) -> Slave {
+    fn from_state(
+        state: SlaveState,
+        address: Address,
+        parameter: Parameter,
+        value: Value,
+    ) -> Slave {
         Slave::WriteParameter(WriteParam {
             state,
+            address,
             parameter,
             value,
         })
@@ -305,9 +320,9 @@ impl WriteParam {
         SendData::nak_from_state(self.state)
     }
 
-    /// The address the write request was sent to. This is always our address.
+    /// The address the write request was sent to.
     pub fn address(&self) -> Address {
-        self.state.address
+        self.address
     }
 
     /// The parameter to be written.
