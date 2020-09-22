@@ -46,7 +46,7 @@ fn slave_loop(mut serial: BusInterface) -> Result<(), slave::Error> {
         };
 
         slave_proto = match slave_proto {
-            Slave::ReadData(recv) => {
+            Slave::ReceiveData(recv) => {
                 let mut buf = [0; 1];
                 if let Ok(len) = serial.read(&mut buf) {
                     if len == 0 {

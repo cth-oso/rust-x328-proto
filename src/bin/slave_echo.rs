@@ -11,7 +11,7 @@ fn slave_main_loop() -> Result<(), Box<dyn Error>> {
 
     loop {
         slave_proto = match slave_proto {
-            Slave::ReadData(recv) => {
+            Slave::ReceiveData(recv) => {
                 // print!("Reading one byte from stdin\n");
                 let mut data_in = vec![0];
                 if io::stdin().read(data_in.as_mut_slice())? == 0 {

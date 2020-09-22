@@ -16,7 +16,7 @@ fn slave_main_loop() {
 
     'main: loop {
         slave_proto = match slave_proto {
-            Slave::ReadData(recv) => {
+            Slave::ReceiveData(recv) => {
                 let mut buf = [0; 1];
                 if let Ok(len) = serial.read(&mut buf) {
                     if len == 0 {

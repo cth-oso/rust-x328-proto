@@ -38,7 +38,7 @@ use crate::types::{self, Address, IntoAddress, Parameter, Value};
 /// 'main: loop {
 ///        # break // this snippet is only for show
 ///        slave_proto = match slave_proto {
-///            Slave::ReadData(recv) => {
+///            Slave::ReceiveData(recv) => {
 ///                let mut buf = [0; 1];
 ///                if let Ok(len) = serial.read(&mut buf) {
 ///                    if len == 0 {
@@ -78,7 +78,7 @@ use crate::types::{self, Address, IntoAddress, Parameter, Value};
 #[derive(Debug)]
 pub enum Slave {
     /// More data needs to be received from the bus. Use receive_data() on the inner struct.
-    ReadData(ReadData),
+    ReceiveData(ReceiveData),
     /// Data is waiting to be transmitted.
     SendData(SendData),
     /// A parameter read request from the bus master.
@@ -97,7 +97,8 @@ impl Slave {
     /// let mut slave_proto = Slave::new(my_address); // new protocol instance with address 10
     /// ```
     pub fn new(address: impl IntoAddress) -> Result<Slave, Error> {
-        Ok(ReadData::create(address.into_address()?))
+        Ok(ReceiveData::create(address.into_address()?))
+    }
     }
 }
 
@@ -119,14 +120,14 @@ struct SlaveStateStruct {
 impl SlaveStateStruct {}
 
 #[derive(Debug)]
-pub struct ReadData {
+pub struct ReceiveData {
     state: SlaveState,
     input_buffer: Buffer,
 }
 
-impl ReadData {
+impl ReceiveData {
     fn create(address: Address) -> Slave {
-        Slave::ReadData(ReadData {
+        Slave::ReceiveData(ReceiveData {
             state: Box::new(SlaveStateStruct {
                 address,
                 read_again_param: None,
@@ -136,7 +137,7 @@ impl ReadData {
     }
 
     fn from_state(state: SlaveState) -> Slave {
-        Slave::ReadData(ReadData {
+        Slave::ReceiveData(ReceiveData {
             state,
             input_buffer: Buffer::new(),
         })
@@ -192,7 +193,7 @@ impl ReadData {
     }
 
     fn need_data(self) -> Slave {
-        Slave::ReadData(self)
+        Slave::ReceiveData(self)
     }
 
     fn send_nak(self) -> Slave {
@@ -227,7 +228,7 @@ impl SendData {
     /// Signals that the data was sent, and it's time to go back to the
     /// ReadData state.
     pub fn data_sent(self) -> Slave {
-        ReadData::from_state(self.state)
+        ReceiveData::from_state(self.state)
     }
 }
 
