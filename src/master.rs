@@ -387,10 +387,19 @@ mod tests {
     use super::*;
     use std::convert::TryInto;
 
+    fn addr_param_val(addr: usize, param: usize, val: i32) -> (Address, Parameter, Value) {
+        (
+            addr.try_into().unwrap(),
+            param.try_into().unwrap(),
+            val.try_into().unwrap(),
+        )
+    }
+
     #[test]
     fn write_parameter() -> Result<(), Error> {
+        let (addr, param, val) = addr_param_val(43, 1234, 56);
         let mut master = Master::new();
-        let x = master.write_parameter(43.try_into()?, 1234.try_into()?, 56);
+        let x = master.write_parameter(addr, param, val);
         // println!("{}", String::from_utf8(x.as_slice().to_vec()).unwrap());
         assert_eq!(x.as_slice(), b"\x044433\x02123400056\x034");
         Ok(())
@@ -398,8 +407,9 @@ mod tests {
 
     #[test]
     fn read_parameter() -> Result<(), Error> {
+        let (addr, param, _) = addr_param_val(43, 1234, 56);
         let mut master = Master::new();
-        let x = master.read_parameter(43.try_into()?, 1234.try_into()?);
+        let x = master.read_parameter(addr, param);
         // println!("{}", String::from_utf8(x.as_slice().to_vec()).unwrap());
         assert_eq!(x.as_slice(), b"\x0444331234\x05");
         Ok(())
@@ -407,9 +417,8 @@ mod tests {
 
     #[test]
     fn read_again() -> Result<(), Error> {
+        let (addr, param, _) = addr_param_val(10, 20, 56);
         let mut idle = Master::new();
-        let addr = Address::new(10)?;
-        let param = Parameter::new(20)?;
         idle.set_slave_capabilites(addr, true);
         idle.read_again = Some((addr, param));
         let send = idle.read_parameter(addr, param.checked_add(1)?);
