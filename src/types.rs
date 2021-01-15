@@ -131,7 +131,7 @@ impl Parameter {
     /// is in the range [0, 9999].
     pub fn new(parameter: i16) -> Result<Parameter, Error> {
         ensure!(
-            0 <= parameter && parameter <= 9999,
+            (0..=9999).contains(&parameter),
             invalid_parameter(parameter)
         );
         Ok(Parameter(parameter))
