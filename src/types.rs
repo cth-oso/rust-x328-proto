@@ -141,7 +141,7 @@ impl Parameter {
         Parameter::new(
             self.0
                 .checked_add(offset)
-                .with_context(|| invalid_parameter(self.0 + offset))?,
+                .with_context(|| invalid_parameter("Checked add failed"))?,
         )
     }
 
@@ -265,6 +265,7 @@ mod tests {
         assert!(p10.checked_add(-20).is_err());
 
         assert!(Parameter(9999).checked_add(1).is_err());
+        assert!(Parameter(9999).checked_add(32000).is_err());
 
         let str = &p10.to_bytes();
         assert_eq!(str, b"0010");
