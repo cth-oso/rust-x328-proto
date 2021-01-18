@@ -37,7 +37,7 @@ fn slave_main_loop() {
                 if read_command.parameter() == 3 {
                     read_command.send_invalid_parameter()
                 } else {
-                    read_command.send_reply_ok(4)
+                    read_command.send_reply_ok(Value::new(4).unwrap())
                 }
             }
 

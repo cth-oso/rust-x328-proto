@@ -153,7 +153,7 @@ pub(crate) mod slave {
     mod tests {
         use super::*;
         use crate::buffer::Buffer;
-        use ascii::AsciiChar::{Space, EOT};
+        use ascii::AsciiChar::EOT;
         use ascii::{AsAsciiStr, AsciiString};
         use nom::Needed::Size;
 
@@ -189,6 +189,7 @@ pub(crate) mod slave {
             let mut cmd = AsciiString::new();
             let addr = Address::new(10).unwrap();
             let param = Parameter::new(1234).unwrap();
+            let value = Value::new(12345).unwrap();
 
             macro_rules! push {
                 ($x:expr) => {
@@ -207,11 +208,12 @@ pub(crate) mod slave {
 
             assert_eq!(write!(), incomplete!(4));
 
-            push!("1234123456\x03");
+            push!("123412345\x03");
             assert_eq!(write!(), incomplete!(1)); // missing bcc
 
-            push!(" ");
-            assert_eq!(write!(), Ok(("", WriteParameter(addr, param, 123456))));
+            let correct_bcc = AsciiChar::from_ascii(crate::bcc(&(cmd.as_bytes()[6..]))).unwrap();
+            cmd.push(correct_bcc);
+            assert_eq!(write!(), Ok(("", WriteParameter(addr, param, value))));
             let x = cmd.len() - 1;
             cmd[x] = EOT; // Invalid BCC
             assert_eq!(
@@ -219,9 +221,9 @@ pub(crate) mod slave {
                 (cmd.len(), InvalidPayload(addr))
             );
 
-            cmd[x] = Space; // Valid BCC
+            cmd[x] = correct_bcc; // Valid BCC
             push!("asd");
-            assert_eq!(write!(), Ok(("asd", WriteParameter(addr, param, 123456))));
+            assert_eq!(write!(), Ok(("asd", WriteParameter(addr, param, value))));
         }
 
         #[test]

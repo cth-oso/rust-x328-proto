@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::{self, Read, Write};
 
 use std::error::Error;
-use x328_proto::Slave;
+use x328_proto::{Slave, Value};
 
 fn slave_main_loop() -> Result<(), Box<dyn Error>> {
     let mut registers = HashMap::new();
@@ -30,7 +30,7 @@ fn slave_main_loop() -> Result<(), Box<dyn Error>> {
                 if read_command.parameter() == 3 {
                     read_command.send_invalid_parameter()
                 } else {
-                    read_command.send_reply_ok(4)
+                    read_command.send_reply_ok(Value::new(4).unwrap())
                 }
             }
 

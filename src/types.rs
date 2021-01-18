@@ -1,10 +1,9 @@
 use snafu::{ensure, Backtrace, OptionExt, Snafu};
 
+use arrayvec::ArrayVec;
 use std::convert::{TryFrom, TryInto};
 use std::ops::Deref;
 use std::str::FromStr;
-
-pub type Value = i32;
 
 #[derive(Debug, Snafu)]
 #[non_exhaustive]
@@ -267,5 +266,155 @@ mod tests {
         assert_eq!(p9999, 9999);
         assert!(*p9999 < 10_000);
         assert!(*p9999 > 9998);
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum ValueFormat {
+    Wide,
+    Normal,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Value(i32, ValueFormat);
+
+pub(crate) type ValueBytes = ArrayVec<[u8; 6]>;
+
+impl Value {
+    pub const fn new(value: i32) -> Option<Value> {
+        if value < -99999 || value > 99999 {
+            return None;
+        }
+        let fmt = {
+            if value < -9999 {
+                ValueFormat::Wide
+            } else {
+                ValueFormat::Normal
+            }
+        };
+        Some(Value(value, fmt))
+    }
+
+    pub const fn new_fmt(value: i32, fmt: ValueFormat) -> Option<Value> {
+        let (min, max) = match fmt {
+            ValueFormat::Wide => (-99999, 99999),
+            ValueFormat::Normal => (-9999, 99999),
+        };
+        if value < min || value > max {
+            return None;
+        }
+        Some(Value(value, fmt))
+    }
+
+    pub(crate) fn to_bytes(&self) -> ValueBytes {
+        match self.1 {
+            ValueFormat::Wide => {
+                let mut buf = [0_u8; 6];
+                let mut val = self.0;
+                buf[0] = match val >= 0 {
+                    true => b'+',
+                    false => b'-',
+                };
+                for b in (&mut buf[1..]).iter_mut().rev() {
+                    *b = b'0' + (val % 10) as u8;
+                    val /= 10;
+                }
+                debug_assert_eq!(val, 0, "Value didn't fit in Wide format: {}.", self.0);
+                buf.into()
+            }
+            ValueFormat::Normal => {
+                let mut buf = ValueBytes::new();
+                let mut val = self.0;
+                let positive = val >= 0;
+                loop {
+                    buf.push(b'0' + (val % 10) as u8);
+                    val /= 10;
+                    if val == 0 {
+                        break;
+                    }
+                }
+                if buf.len() < 5 {
+                    buf.push(match positive {
+                        true => b'+',
+                        false => b'-',
+                    });
+                } else {
+                    debug_assert!(
+                        positive && buf.len() == 5,
+                        "Value to large to transmit in Normal X3.28 format: {}.",
+                        self.0
+                    );
+                }
+                buf.reverse();
+                buf
+            }
+        }
+    }
+}
+
+pub trait IntoValue {
+    fn into_value(self) -> Option<Value>;
+}
+
+impl IntoValue for Value {
+    fn into_value(self) -> Option<Value> {
+        Some(self)
+    }
+}
+
+impl<T> IntoValue for T
+where
+    T: Into<i32>,
+{
+    fn into_value(self) -> Option<Value> {
+        let value = self.into();
+        if !(-99999..=99999).contains(&value) {
+            return None;
+        }
+        let fmt = {
+            if value < -9999 {
+                ValueFormat::Wide
+            } else {
+                ValueFormat::Normal
+            }
+        };
+        Some(Value(value, fmt))
+    }
+}
+
+impl FromStr for Value {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let fmt = match s.len() {
+            1..=5 => ValueFormat::Normal,
+            6 => ValueFormat::Wide,
+            _ => {
+                return InvalidValue {
+                    value: s.to_owned(),
+                }
+                .fail()
+            }
+        };
+        Ok(Value(
+            s.parse().ok().with_context(|| InvalidValue {
+                value: s.to_owned(),
+            })?,
+            fmt,
+        ))
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Deref for Value {
+    type Target = i32;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }

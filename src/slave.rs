@@ -32,6 +32,7 @@ use crate::types::{self, Address, IntoAddress, Parameter, Value};
 /// # { Ok(Cursor::new(Vec::new())) }
 /// #
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// use x328_proto::Value;
 /// let mut slave_proto = Slave::new(10)?; // new protocol instance with address 10
 /// let mut serial = connect_serial_interface()?;
 ///
@@ -59,7 +60,7 @@ use crate::types::{self, Address, IntoAddress, Parameter, Value};
 ///                if read_command.parameter() == 3 {
 ///                    read_command.send_invalid_parameter()
 ///                } else {
-///                    read_command.send_reply_ok(4)
+///                    read_command.send_reply_ok(Value::new(4).unwrap())
 ///                }
 ///            }
 ///
@@ -268,13 +269,10 @@ impl ReadParam {
     pub fn send_reply_ok(mut self, value: Value) -> Slave {
         self.state.read_again_param = Some((self.address, self.parameter));
 
-        let value = format!("{:+06}", value);
-        assert_eq!(value.len(), 6);
-
         let mut data = Vec::with_capacity(15);
         data.push(STX);
         data.extend_from_slice(&self.parameter.to_bytes());
-        data.extend_from_slice(value.as_bytes());
+        data.extend_from_slice(&value.to_bytes());
         data.push(ETX);
         data.push(bcc(&data[1..]));
 

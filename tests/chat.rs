@@ -6,9 +6,9 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::thread;
 use std::time::Duration;
 
-use x328_proto::master;
 use x328_proto::master::io::Master;
 use x328_proto::slave::{self, Slave};
+use x328_proto::{master, Value};
 
 use common::{BusInterface, RS422Bus};
 
@@ -24,7 +24,7 @@ fn master_main_loop(io: BusInterface) -> Result<(), master::io::Error> {
             }
 
             match master.read_parameter(addr, 20) {
-                Ok(val) => println!("Master read param ok {}", val),
+                Ok(val) => println!("Master read param ok {}", *val),
                 Err(err) => println!("Master read error {:?}", err),
             }
         }
@@ -70,7 +70,7 @@ fn slave_loop(mut serial: BusInterface) -> Result<(), slave::Error> {
                 if read_command.parameter() == 3 {
                     read_command.send_invalid_parameter()
                 } else {
-                    read_command.send_reply_ok(4)
+                    read_command.send_reply_ok(Value::new(4).unwrap())
                 }
             }
 

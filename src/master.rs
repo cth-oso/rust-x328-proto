@@ -64,8 +64,7 @@ impl Master {
         data.try_extend_from_slice(&address.to_bytes()).unwrap();
         data.push(SOX.as_byte());
         data.try_extend_from_slice(&parameter.to_bytes()).unwrap();
-        data.try_extend_from_slice(format!("{:05}", value).as_bytes())
-            .unwrap();
+        data.try_extend_from_slice(&value.to_bytes()).unwrap();
         data.push(ETX.as_byte());
         data.push(bcc(&data[6..]));
         SendData::new(data, ReceiveWriteResponse::new(self))
@@ -250,16 +249,17 @@ impl<'a> Receiver<'a> for ReceiveReadResponse<'a> {
 }
 
 pub mod io {
-    use snafu::{Backtrace, ResultExt, Snafu};
+    use snafu::{Backtrace, OptionExt, ResultExt, Snafu};
 
     use crate::master::{ReadResult, ReceiveDataResult, Receiver, SendData, WriteResult};
-    use crate::types::{self, IntoAddress, IntoParameter, Value};
+    use crate::types::{IntoAddress, IntoParameter, IntoValue, Value};
+    use crate::{Address, Parameter};
     use std::io::{Read, Write};
 
     #[derive(Debug, Snafu)]
     pub enum Error {
-        #[snafu(display("Invalid argument given: {}", source), context(false))]
-        InvalidArgument { source: types::Error },
+        #[snafu(display("Invalid argument: {} out of range", arg))]
+        InvalidArgument { arg: &'static str },
         #[snafu(display("X3.28 invalid parameter"))]
         InvalidParameter { backtrace: Backtrace },
         #[snafu(display("X3.28 write received NAK response"))]
@@ -349,10 +349,12 @@ pub mod io {
             &mut self,
             address: impl IntoAddress,
             parameter: impl IntoParameter,
-            value: Value,
+            value: impl IntoValue,
         ) -> Result<(), Error> {
-            let address = address.into_address()?;
-            let parameter = parameter.into_parameter()?;
+            let (address, parameter) = check_addr_param(address, parameter)?;
+            let value = value
+                .into_value()
+                .context(InvalidArgument { arg: "value" })?;
             let response = self
                 .proto
                 .write_parameter(address, parameter, value)
@@ -370,8 +372,7 @@ pub mod io {
             address: impl IntoAddress,
             parameter: impl IntoParameter,
         ) -> Result<Value, Error> {
-            let address = address.into_address()?;
-            let parameter = parameter.into_parameter()?;
+            let (address, parameter) = check_addr_param(address, parameter)?;
             let response = self
                 .proto
                 .read_parameter(address, parameter)
@@ -384,7 +385,22 @@ pub mod io {
             }
         }
     } // impl Master
-}
+
+    fn check_addr_param(
+        addr: impl IntoAddress,
+        param: impl IntoParameter,
+    ) -> Result<(Address, Parameter), Error> {
+        Ok((
+            addr.into_address()
+                .ok()
+                .context(InvalidArgument { arg: "address" })?,
+            param
+                .into_parameter()
+                .ok()
+                .context(InvalidArgument { arg: "parameter" })?,
+        ))
+    }
+} // mod io
 
 /// Tests for the base sans-IO master implementation
 #[cfg(test)]
@@ -396,7 +412,7 @@ mod tests {
         (
             addr.try_into().unwrap(),
             param.try_into().unwrap(),
-            val.try_into().unwrap(),
+            Value::new(val).unwrap(),
         )
     }
 
@@ -406,7 +422,7 @@ mod tests {
         let mut master = Master::new();
         let x = master.write_parameter(addr, param, val);
         // println!("{}", String::from_utf8(x.as_slice().to_vec()).unwrap());
-        assert_eq!(x.as_slice(), b"\x044433\x02123400056\x034");
+        assert_eq!(x.as_slice(), b"\x044433\x021234+56\x03\x2F");
         Ok(())
     }
 
