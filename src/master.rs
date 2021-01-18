@@ -150,6 +150,14 @@ mod private {
     }
 }
 
+/// Return value from Receiver::recieve_data()
+/// Indicates if enough data has been received or if more data is needed.
+/// R is the receiver (Self), T is Self::Response
+pub enum ReceiveDataResult<R, T> {
+    Done(T),
+    NeedData(R),
+}
+
 /// Provides the receive_data() method for parsing response
 /// data from the slaves.
 pub trait Receiver<'a>: Sized + private::CreateReceiver<'a> {
@@ -159,14 +167,14 @@ pub trait Receiver<'a>: Sized + private::CreateReceiver<'a> {
     /// slice will result in a TransmissionError response.
     ///
     /// No more data should be read when Some(response) is returned.
-    fn receive_data(&mut self, data: &[u8]) -> Option<Self::Response>;
+    fn receive_data(self, data: &[u8]) -> ReceiveDataResult<Self, Self::Response>;
 }
 
 #[derive(Debug, PartialEq)]
-pub enum WriteResponse {
+pub enum WriteResult {
     WriteOk,
     WriteFailed,
-    TransmissionError,
+    ProtocolError,
 }
 
 #[derive(Debug)]
@@ -185,30 +193,29 @@ impl<'a> private::CreateReceiver<'a> for ReceiveWriteResponse<'a> {
 }
 
 impl<'b> Receiver<'b> for ReceiveWriteResponse<'b> {
-    type Response = WriteResponse;
+    type Response = WriteResult;
 
-    fn receive_data(&mut self, data: &[u8]) -> Option<Self::Response> {
+    fn receive_data(mut self, data: &[u8]) -> ReceiveDataResult<Self, Self::Response> {
         use ResponseToken::*;
 
         if data.is_empty() {
-            return Some(WriteResponse::TransmissionError);
+            return ReceiveDataResult::Done(WriteResult::ProtocolError);
         }
         self.buffer.write(data);
 
-        match parse_write_reponse(self.buffer.as_str_slice()) {
-            NeedData => None,
-            WriteOk => Some(WriteResponse::WriteOk),
-            WriteFailed | InvalidParameter => Some(WriteResponse::WriteFailed),
-            _ => Some(WriteResponse::TransmissionError),
-        }
+        ReceiveDataResult::Done(match parse_write_reponse(self.buffer.as_str_slice()) {
+            WriteOk => WriteResult::WriteOk,
+            WriteFailed | InvalidParameter => WriteResult::WriteFailed,
+            _ => WriteResult::ProtocolError,
+        })
     }
 }
 
 #[derive(Debug, PartialEq)]
-pub enum ReadResponse {
+pub enum ReadResult {
     InvalidParameter,
     Ok(Value),
-    TransmissionError,
+    ProtocolError,
 }
 
 #[derive(Debug)]
@@ -227,19 +234,19 @@ impl<'a> private::CreateReceiver<'a> for ReceiveReadResponse<'a> {
 }
 
 impl<'a> Receiver<'a> for ReceiveReadResponse<'a> {
-    type Response = ReadResponse;
+    type Response = ReadResult;
 
-    fn receive_data(&mut self, data: &[u8]) -> Option<Self::Response> {
+    fn receive_data(mut self, data: &[u8]) -> ReceiveDataResult<Self, Self::Response> {
         use ResponseToken::*;
 
         if data.is_empty() {
-            return Some(ReadResponse::TransmissionError);
+            return ReceiveDataResult::Done(ReadResult::ProtocolError);
         }
 
         self.buffer.write(data);
 
-        match parse_read_response(self.buffer.as_str_slice()) {
-            NeedData => None,
+        ReceiveDataResult::Done(match parse_read_response(self.buffer.as_str_slice()) {
+            NeedData => return ReceiveDataResult::NeedData(self),
             ReadOK { parameter, value }
                 if (parameter
                     == self
@@ -250,18 +257,18 @@ impl<'a> Receiver<'a> for ReceiveReadResponse<'a> {
             {
                 self.master.read_again = self.master.read_in_progress;
                 debug_assert!(self.master.read_again.is_some());
-                Some(ReadResponse::Ok(value))
+                ReadResult::Ok(value)
             }
-            InvalidParameter => Some(ReadResponse::InvalidParameter),
-            _ => Some(ReadResponse::TransmissionError),
-        }
+            InvalidParameter => ReadResult::InvalidParameter,
+            _ => ReadResult::ProtocolError,
+        })
     }
 }
 
 pub mod io {
     use snafu::{Backtrace, ResultExt, Snafu};
 
-    use crate::master::{ReadResponse, Receiver, SendData, WriteResponse};
+    use crate::master::{ReadResult, ReceiveDataResult, Receiver, SendData, WriteResult};
     use crate::types::{self, IntoAddress, IntoParameter, Value};
     use std::io::{Read, Write};
 
@@ -292,8 +299,9 @@ pub mod io {
             loop {
                 let len = reader.read(&mut data).unwrap_or(0);
                 // A zero length slice will cause receive_data() to return TransmissionError
-                if let Some(resp) = self.receive_data(&data[..len]) {
-                    return resp;
+                match self.receive_data(&data[..len]) {
+                    ReceiveDataResult::Done(response) => return response,
+                    ReceiveDataResult::NeedData(reader) => self = reader,
                 }
             }
         }
@@ -362,9 +370,9 @@ pub mod io {
                 .write_to(&mut self.stream)?
                 .receive_from(&mut self.stream);
             match response {
-                WriteResponse::WriteOk => Ok(()),
-                WriteResponse::WriteFailed => WriteNAK {}.fail(),
-                WriteResponse::TransmissionError => BusDataError {}.fail(),
+                WriteResult::WriteOk => Ok(()),
+                WriteResult::WriteFailed => WriteNAK {}.fail(),
+                WriteResult::ProtocolError => BusDataError {}.fail(),
             }
         }
 
@@ -381,9 +389,9 @@ pub mod io {
                 .write_to(&mut self.stream)?
                 .receive_from(&mut self.stream);
             match response {
-                ReadResponse::Ok(value) => Ok(value),
-                ReadResponse::InvalidParameter => InvalidParameter {}.fail(),
-                ReadResponse::TransmissionError => BusDataError {}.fail(),
+                ReadResult::Ok(value) => Ok(value),
+                ReadResult::InvalidParameter => InvalidParameter {}.fail(),
+                ReadResult::ProtocolError => BusDataError {}.fail(),
             }
         }
     } // impl Master
