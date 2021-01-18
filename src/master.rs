@@ -2,7 +2,6 @@ use ascii::AsciiChar::{BackSpace, ACK, ENQ, EOT, ETX, NAK, SOX};
 use snafu::Snafu;
 
 use std::fmt::{Debug, Formatter};
-use std::marker::PhantomData;
 
 use crate::bcc;
 use crate::buffer::Buffer;
@@ -23,7 +22,6 @@ struct SlaveState {
 
 pub struct Master {
     read_again: Option<(Address, Parameter)>,
-    read_in_progress: Option<(Address, Parameter)>,
     slaves: [SlaveState; 100],
 }
 
@@ -31,8 +29,8 @@ impl Debug for Master {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Master {{ read_again: {:?}, read_in_progress: {:?}, slaves: [..]}}",
-            self.read_again, self.read_in_progress
+            "Master {{ read_again: {:?}, slaves: [..]}}",
+            self.read_again
         )
     }
 }
@@ -47,7 +45,6 @@ impl Master {
     pub fn new() -> Master {
         Master {
             read_again: None,
-            read_in_progress: None,
             slaves: [SlaveState {
                 can_read_again: false,
             }; 100],
@@ -69,7 +66,7 @@ impl Master {
         data.extend_from_slice(format!("{:05}", value).as_bytes());
         data.push(ETX.as_byte());
         data.push(bcc(&data[6..]));
-        SendData::new(self, data)
+        SendData::new(data, ReceiveWriteResponse::new(self))
     }
 
     pub fn read_parameter(
@@ -78,7 +75,7 @@ impl Master {
         parameter: Parameter,
     ) -> SendData<ReceiveReadResponse> {
         let mut data = Vec::with_capacity(10);
-        if let Some(again) = self.read_again(address, parameter) {
+        if let Some(again) = self.try_read_again(address, parameter) {
             data.push(again);
         } else {
             data.push(EOT.as_byte());
@@ -86,11 +83,12 @@ impl Master {
             data.extend_from_slice(&parameter.to_bytes());
             data.push(ENQ.as_byte());
         }
-        self.read_in_progress = Some((address, parameter));
-        SendData::new(self, data)
+        SendData::new(data, ReceiveReadResponse::new(self, address, parameter))
     }
 
-    fn read_again(&mut self, address: Address, parameter: Parameter) -> Option<u8> {
+    /// Check if we can use the short "read-again" command form.
+    /// Consumes the self.read_again value
+    fn try_read_again(&mut self, address: Address, parameter: Parameter) -> Option<u8> {
         let (old_addr, old_param) = self.read_again.take()?;
         if old_addr == address && self.get_slave_capabilites(address).can_read_again {
             match *parameter - *old_param {
@@ -114,19 +112,14 @@ impl Master {
 }
 
 #[derive(Debug)]
-pub struct SendData<'a, R: Receiver<'a>> {
-    master: &'a mut Master,
+pub struct SendData<R> {
     data: Vec<u8>,
-    receiver: PhantomData<R>,
+    receiver: R,
 }
 
-impl<'a, R: Receiver<'a>> SendData<'a, R> {
-    fn new(master: &'a mut Master, data: Vec<u8>) -> Self {
-        SendData {
-            master,
-            data,
-            receiver: PhantomData,
-        }
+impl<'a, R: Receiver<'a>> SendData<R> {
+    fn new(data: Vec<u8>, receiver: R) -> Self {
+        SendData { data, receiver }
     }
 
     pub fn as_slice(&self) -> &[u8] {
@@ -134,20 +127,12 @@ impl<'a, R: Receiver<'a>> SendData<'a, R> {
     }
 
     pub fn data_sent(self) -> R {
-        R::new(self.master)
-    }
-
-    pub fn send_failed(mut self) {
-        self.master.read_again = None;
-        self.master.read_in_progress = None;
+        self.receiver
     }
 }
 
 mod private {
-    use super::Master;
-    pub trait CreateReceiver<'a> {
-        fn new(master: &'a mut Master) -> Self;
-    }
+    pub trait Receiver {}
 }
 
 /// Return value from Receiver::recieve_data()
@@ -160,7 +145,7 @@ pub enum ReceiveDataResult<R, T> {
 
 /// Provides the receive_data() method for parsing response
 /// data from the slaves.
-pub trait Receiver<'a>: Sized + private::CreateReceiver<'a> {
+pub trait Receiver<'a>: Sized + private::Receiver {
     type Response;
 
     /// Receive and parse data from the bus. Passing a zero length
@@ -179,18 +164,20 @@ pub enum WriteResult {
 
 #[derive(Debug)]
 pub struct ReceiveWriteResponse<'a> {
-    master: &'a Master,
+    master: &'a mut Master,
     buffer: Buffer,
 }
 
-impl<'a> private::CreateReceiver<'a> for ReceiveWriteResponse<'a> {
-    fn new(master: &'a mut Master) -> ReceiveWriteResponse<'a> {
+impl<'a> ReceiveWriteResponse<'a> {
+    fn new(master: &'a mut Master) -> Self {
         ReceiveWriteResponse {
             master,
             buffer: Buffer::new(),
         }
     }
 }
+
+impl private::Receiver for ReceiveWriteResponse<'_> {}
 
 impl<'b> Receiver<'b> for ReceiveWriteResponse<'b> {
     type Response = WriteResult;
@@ -218,16 +205,26 @@ pub enum ReadResult {
 pub struct ReceiveReadResponse<'a> {
     master: &'a mut Master,
     buffer: Buffer,
+    address: Address,
+    expected_param: Parameter,
 }
 
-impl<'a> private::CreateReceiver<'a> for ReceiveReadResponse<'a> {
-    fn new(master: &'a mut Master) -> ReceiveReadResponse<'a> {
+impl<'a> ReceiveReadResponse<'a> {
+    fn new(
+        master: &'a mut Master,
+        address: Address,
+        parameter: Parameter,
+    ) -> ReceiveReadResponse<'a> {
         ReceiveReadResponse {
             master,
             buffer: Buffer::new(),
+            address,
+            expected_param: parameter,
         }
     }
 }
+
+impl private::Receiver for ReceiveReadResponse<'_> {}
 
 impl<'a> Receiver<'a> for ReceiveReadResponse<'a> {
     type Response = ReadResult;
@@ -238,16 +235,8 @@ impl<'a> Receiver<'a> for ReceiveReadResponse<'a> {
 
         ReceiveDataResult::Done(match parse_read_response(self.buffer.as_str_slice()) {
             NeedData => return ReceiveDataResult::NeedData(self),
-            ReadOK { parameter, value }
-                if (parameter
-                    == self
-                        .master
-                        .read_in_progress
-                        .expect("read_in_progress is None while running read query!")
-                        .1) =>
-            {
-                self.master.read_again = self.master.read_in_progress;
-                debug_assert!(self.master.read_again.is_some());
+            ReadOK { parameter, value } if (parameter == self.expected_param) => {
+                self.master.read_again = Some((self.address, parameter));
                 ReadResult::Ok(value)
             }
             InvalidParameter => ReadResult::InvalidParameter,
@@ -310,7 +299,7 @@ pub mod io {
         fn write_to(self, writer: &mut impl std::io::Write) -> Result<R, Error>;
     }
 
-    impl<'a, R> WriteData<R> for SendData<'a, R>
+    impl<'a, R> WriteData<R> for SendData<R>
     where
         R: Receiver<'a>,
     {
@@ -320,10 +309,7 @@ pub mod io {
                 .and_then(|_| writer.flush())
             {
                 Ok(_) => Ok(self.data_sent()),
-                Err(err) => {
-                    self.send_failed();
-                    Err(err)
-                }
+                Err(err) => Err(err),
             }
             .context(IOError {})
         }
