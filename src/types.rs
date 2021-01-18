@@ -1,7 +1,7 @@
 use snafu::{ensure, Backtrace, OptionExt, Snafu};
 
-use std::cmp::Ordering;
 use std::convert::{TryFrom, TryInto};
+use std::ops::Deref;
 use std::str::FromStr;
 
 pub type Value = i32;
@@ -69,15 +69,17 @@ impl Address {
     }
 }
 
-impl PartialEq<usize> for Address {
-    fn eq(&self, other: &usize) -> bool {
-        self.0 as usize == *other
+impl Deref for Address {
+    type Target = u8;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-impl Into<usize> for Address {
-    fn into(self) -> usize {
-        self.0 as usize
+impl PartialEq<usize> for Address {
+    fn eq(&self, other: &usize) -> bool {
+        self.0 as usize == *other
     }
 }
 
@@ -154,25 +156,19 @@ impl Parameter {
         }
         buf
     }
+}
 
-    pub fn as_usize(&self) -> usize {
-        self.0 as usize
+impl Deref for Parameter {
+    type Target = i16;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
 impl PartialEq<usize> for Parameter {
     fn eq(&self, other: &usize) -> bool {
         self.0 as usize == *other
-    }
-}
-
-impl PartialOrd<usize> for Parameter {
-    fn partial_cmp(&self, other: &usize) -> Option<Ordering> {
-        if *other > 9999 {
-            Some(Ordering::Less)
-        } else {
-            Some(self.0.cmp(&(*other as i16)))
-        }
     }
 }
 
@@ -193,18 +189,6 @@ where
     fn into_parameter(self) -> Result<Parameter, Error> {
         let cpy = self.clone();
         self.try_into().ok().with_context(|| invalid_parameter(cpy))
-    }
-}
-
-impl Into<usize> for Parameter {
-    fn into(self) -> usize {
-        self.0 as usize
-    }
-}
-
-impl Into<i16> for Parameter {
-    fn into(self) -> i16 {
-        self.0 as i16
     }
 }
 
@@ -281,7 +265,7 @@ mod tests {
     fn test_parameter_ordering() {
         let p9999 = Parameter(9999);
         assert_eq!(p9999, 9999);
-        assert!(p9999 < 10_000);
-        assert!(p9999 > 9998);
+        assert!(*p9999 < 10_000);
+        assert!(*p9999 > 9998);
     }
 }
