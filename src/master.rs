@@ -197,10 +197,6 @@ impl<'b> Receiver<'b> for ReceiveWriteResponse<'b> {
 
     fn receive_data(mut self, data: &[u8]) -> ReceiveDataResult<Self, Self::Response> {
         use ResponseToken::*;
-
-        if data.is_empty() {
-            return ReceiveDataResult::Done(WriteResult::ProtocolError);
-        }
         self.buffer.write(data);
 
         ReceiveDataResult::Done(match parse_write_reponse(self.buffer.as_str_slice()) {
@@ -238,11 +234,6 @@ impl<'a> Receiver<'a> for ReceiveReadResponse<'a> {
 
     fn receive_data(mut self, data: &[u8]) -> ReceiveDataResult<Self, Self::Response> {
         use ResponseToken::*;
-
-        if data.is_empty() {
-            return ReceiveDataResult::Done(ReadResult::ProtocolError);
-        }
-
         self.buffer.write(data);
 
         ReceiveDataResult::Done(match parse_read_response(self.buffer.as_str_slice()) {
@@ -290,17 +281,25 @@ pub mod io {
     }
 
     trait ReceiveFrom<'a>: Receiver<'a> {
-        fn receive_from(self, reader: &mut impl Read) -> Self::Response;
+        fn receive_from(self, reader: &mut impl Read) -> Result<Self::Response, Error>;
     }
 
     impl<'a, R: Receiver<'a>> ReceiveFrom<'a> for R {
-        fn receive_from(mut self, reader: &mut impl Read) -> Self::Response {
+        fn receive_from(mut self, reader: &mut impl Read) -> Result<Self::Response, Error> {
             let mut data = [0];
             loop {
-                let len = reader.read(&mut data).unwrap_or(0);
-                // A zero length slice will cause receive_data() to return TransmissionError
+                let len = match reader.read(&mut data) {
+                    Ok(0) => Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "Read returned Ok(0)",
+                    )),
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    x => x,
+                }
+                .context(IOError {})?;
+
                 match self.receive_data(&data[..len]) {
-                    ReceiveDataResult::Done(response) => return response,
+                    ReceiveDataResult::Done(response) => return Ok(response),
                     ReceiveDataResult::NeedData(reader) => self = reader,
                 }
             }
@@ -368,7 +367,7 @@ pub mod io {
                 .proto
                 .write_parameter(address, parameter, value)
                 .write_to(&mut self.stream)?
-                .receive_from(&mut self.stream);
+                .receive_from(&mut self.stream)?;
             match response {
                 WriteResult::WriteOk => Ok(()),
                 WriteResult::WriteFailed => WriteNAK {}.fail(),
@@ -387,7 +386,7 @@ pub mod io {
                 .proto
                 .read_parameter(address, parameter)
                 .write_to(&mut self.stream)?
-                .receive_from(&mut self.stream);
+                .receive_from(&mut self.stream)?;
             match response {
                 ReadResult::Ok(value) => Ok(value),
                 ReadResult::InvalidParameter => InvalidParameter {}.fail(),
