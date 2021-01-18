@@ -7,6 +7,7 @@ use crate::bcc;
 use crate::buffer::Buffer;
 use crate::nom_parser::master::{parse_read_response, parse_write_reponse, ResponseToken};
 use crate::types::{self, Address, Parameter, Value};
+use arrayvec::ArrayVec;
 
 #[derive(Debug, Snafu)]
 #[non_exhaustive]
@@ -58,12 +59,13 @@ impl Master {
         value: Value,
     ) -> SendData<ReceiveWriteResponse<'_>> {
         self.read_again = None;
-        let mut data = Vec::with_capacity(20);
+        let mut data = SendDataStore::new();
         data.push(EOT.as_byte());
-        data.extend_from_slice(&address.to_bytes());
+        data.try_extend_from_slice(&address.to_bytes()).unwrap();
         data.push(SOX.as_byte());
-        data.extend_from_slice(&parameter.to_bytes());
-        data.extend_from_slice(format!("{:05}", value).as_bytes());
+        data.try_extend_from_slice(&parameter.to_bytes()).unwrap();
+        data.try_extend_from_slice(format!("{:05}", value).as_bytes())
+            .unwrap();
         data.push(ETX.as_byte());
         data.push(bcc(&data[6..]));
         SendData::new(data, ReceiveWriteResponse::new(self))
@@ -74,13 +76,13 @@ impl Master {
         address: Address,
         parameter: Parameter,
     ) -> SendData<ReceiveReadResponse> {
-        let mut data = Vec::with_capacity(10);
+        let mut data = SendDataStore::new();
         if let Some(again) = self.try_read_again(address, parameter) {
             data.push(again);
         } else {
             data.push(EOT.as_byte());
-            data.extend_from_slice(&address.to_bytes());
-            data.extend_from_slice(&parameter.to_bytes());
+            data.try_extend_from_slice(&address.to_bytes()).unwrap();
+            data.try_extend_from_slice(&parameter.to_bytes()).unwrap();
             data.push(ENQ.as_byte());
         }
         SendData::new(data, ReceiveReadResponse::new(self, address, parameter))
@@ -111,14 +113,16 @@ impl Master {
     }
 }
 
+type SendDataStore = ArrayVec<[u8; 20]>;
+
 #[derive(Debug)]
 pub struct SendData<R> {
-    data: Vec<u8>,
+    data: SendDataStore,
     receiver: R,
 }
 
 impl<'a, R: Receiver<'a>> SendData<R> {
-    fn new(data: Vec<u8>, receiver: R) -> Self {
+    fn new(data: SendDataStore, receiver: R) -> Self {
         SendData { data, receiver }
     }
 
