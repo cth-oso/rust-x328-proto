@@ -263,6 +263,7 @@ pub mod io {
 
     use crate::master::{ReadResponse, Receiver, SendData, WriteResponse};
     use crate::types::{self, IntoAddress, IntoParameter, Value};
+    use std::io::{Read, Write};
 
     #[derive(Debug, Snafu)]
     pub enum Error {
@@ -279,6 +280,46 @@ pub mod io {
             source: std::io::Error,
             backtrace: Backtrace,
         },
+    }
+
+    trait ReceiveFrom<'a>: Receiver<'a> {
+        fn receive_from(self, reader: &mut impl Read) -> Self::Response;
+    }
+
+    impl<'a, R: Receiver<'a>> ReceiveFrom<'a> for R {
+        fn receive_from(mut self, reader: &mut impl Read) -> Self::Response {
+            let mut data = [0];
+            loop {
+                let len = reader.read(&mut data).unwrap_or(0);
+                // A zero length slice will cause receive_data() to return TransmissionError
+                if let Some(resp) = self.receive_data(&data[..len]) {
+                    return resp;
+                }
+            }
+        }
+    }
+
+    trait WriteData<R> {
+        fn write_to(self, writer: &mut impl std::io::Write) -> Result<R, Error>;
+    }
+
+    impl<'a, R> WriteData<R> for SendData<'a, R>
+    where
+        R: Receiver<'a>,
+    {
+        fn write_to(self, writer: &mut impl Write) -> Result<R, Error> {
+            match writer
+                .write_all(self.as_slice())
+                .and_then(|_| writer.flush())
+            {
+                Ok(_) => Ok(self.data_sent()),
+                Err(err) => {
+                    self.send_failed();
+                    Err(err)
+                }
+            }
+            .context(IOError {})
+        }
     }
 
     #[derive(Debug)]
@@ -315,9 +356,12 @@ pub mod io {
         ) -> Result<(), Error> {
             let address = address.into_address()?;
             let parameter = parameter.into_parameter()?;
-            let data_out = self.proto.write_parameter(address, parameter, value);
-            let receiver = self.stream.send_data(data_out)?;
-            match self.stream.receive_data(receiver) {
+            let response = self
+                .proto
+                .write_parameter(address, parameter, value)
+                .write_to(&mut self.stream)?
+                .receive_from(&mut self.stream);
+            match response {
                 WriteResponse::WriteOk => Ok(()),
                 WriteResponse::WriteFailed => WriteNAK {}.fail(),
                 WriteResponse::TransmissionError => BusDataError {}.fail(),
@@ -331,53 +375,18 @@ pub mod io {
         ) -> Result<Value, Error> {
             let address = address.into_address()?;
             let parameter = parameter.into_parameter()?;
-            let send = self.proto.read_parameter(address, parameter);
-            let receiver = self.stream.send_data(send)?;
-            match self.stream.receive_data(receiver) {
+            let response = self
+                .proto
+                .read_parameter(address, parameter)
+                .write_to(&mut self.stream)?
+                .receive_from(&mut self.stream);
+            match response {
                 ReadResponse::Ok(value) => Ok(value),
                 ReadResponse::InvalidParameter => InvalidParameter {}.fail(),
                 ReadResponse::TransmissionError => BusDataError {}.fail(),
             }
         }
     } // impl Master
-
-    trait MasterTRX: std::io::Read + std::io::Write {
-        fn receive_data<'a, T: Receiver<'a>>(&mut self, receiver: T) -> T::Response;
-        fn send_data<'a, T: Receiver<'a>>(&mut self, sender: SendData<'a, T>) -> Result<T, Error>;
-    }
-
-    impl<T> MasterTRX for T
-    where
-        T: std::io::Read + std::io::Write,
-    {
-        fn receive_data<'a, R: Receiver<'a>>(
-            &mut self,
-            mut receiver: R,
-        ) -> <R as Receiver<'a>>::Response {
-            let mut data = [0];
-            loop {
-                let len = match self.read(&mut data) {
-                    Ok(len) => len,
-                    _ => 0,
-                };
-                // A zero length slice will cause receive_data() to return TransmissionError
-                if let Some(resp) = receiver.receive_data(&data[..len]) {
-                    return resp;
-                }
-            }
-        }
-
-        fn send_data<'a, R: Receiver<'a>>(&mut self, sender: SendData<'a, R>) -> Result<R, Error> {
-            match self.write_all(sender.as_slice()).and_then(|_| self.flush()) {
-                Ok(_) => Ok(sender.data_sent()),
-                Err(err) => {
-                    sender.send_failed();
-                    Err(err)
-                }
-            }
-            .context(IOError {})
-        }
-    }
 }
 
 /// Tests for the base sans-IO master implementation
