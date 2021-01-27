@@ -156,11 +156,11 @@ pub(crate) mod slave {
         use crate::buffer::Buffer;
         use ascii::AsciiChar::EOT;
         use ascii::{AsAsciiStr, AsciiString};
-        use nom::Needed::Size;
+        use nom::Needed;
 
         macro_rules! incomplete {
             ($x: expr) => {
-                Err(Incomplete(Size($x)))
+                Err(Incomplete(Needed::new($x)))
             };
         }
 
@@ -283,10 +283,9 @@ fn ascii_char<'a, E: ParseError<&'a Buf>>(
     streaming::char(ascii_char.as_char())
 }
 
-fn map_int<'a, O, E, F>(first: F) -> impl Fn(&'a Buf) -> IResult<&'a Buf, O, E>
+fn map_int<'a, O, F>(first: F) -> impl FnMut(&'a Buf) -> IResult<&'a Buf, O>
 where
-    E: ParseError<&'a Buf>,
-    F: Fn(&'a Buf) -> IResult<&'a Buf, &'a Buf, E>,
+    F: Fn(&'a Buf) -> IResult<&'a Buf, &'a Buf>,
     O: std::str::FromStr,
 {
     // for [u8] buffer

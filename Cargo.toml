@@ -9,5 +9,5 @@ edition = "2018"
 [dependencies]
 arrayvec = "0.5"
 ascii = "1"
-nom = "5.1"
+nom = "6.1"
 snafu = { version="0.6", default-features=false, features=["std"] }
