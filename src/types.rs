@@ -306,6 +306,10 @@ impl Value {
         Some(Value(value, fmt))
     }
 
+    pub fn try_u16(&self) -> Option<u16> {
+        self.0.try_into().ok()
+    }
+
     pub(crate) fn to_bytes(&self) -> ValueBytes {
         match self.1 {
             ValueFormat::Wide => {
@@ -379,6 +383,23 @@ where
             }
         };
         Some(Value(value, fmt))
+    }
+}
+
+impl From<u16> for Value {
+    fn from(val: u16) -> Self {
+        Value(val as i32, ValueFormat::Normal)
+    }
+}
+
+impl From<i16> for Value {
+    fn from(val: i16) -> Self {
+        let fmt = if val < -9999 {
+            ValueFormat::Wide
+        } else {
+            ValueFormat::Normal
+        };
+        Value(val as i32, fmt)
     }
 }
 
