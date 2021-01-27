@@ -171,7 +171,7 @@ impl PartialEq<usize> for Parameter {
     }
 }
 
-pub trait IntoParameter: TryInto<Parameter> {
+pub trait IntoParameter {
     fn into_parameter(self) -> Result<Parameter, Error>;
 }
 
@@ -183,11 +183,11 @@ impl IntoParameter for Parameter {
 
 impl<T> IntoParameter for T
 where
-    T: TryInto<Parameter> + ToString + Clone,
+    T: TryInto<i16> + ToString + Clone,
 {
     fn into_parameter(self) -> Result<Parameter, Error> {
-        let cpy = self.clone();
-        self.try_into().ok().with_context(|| invalid_parameter(cpy))
+        let e = self.clone();
+        Parameter::new(self.try_into().ok().with_context(|| invalid_parameter(e))?)
     }
 }
 
