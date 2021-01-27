@@ -9,7 +9,7 @@ pub mod slave;
 
 pub use master::Master;
 pub use slave::Slave;
-pub use types::{Address, Parameter, Value};
+pub use types::{Address, IntoAddress, IntoParameter, IntoValue, Parameter, Value};
 
 mod buffer;
 mod nom_parser;
