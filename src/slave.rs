@@ -90,12 +90,12 @@ pub enum Slave {
 
 impl Slave {
     /// Create a new protocol instance, accepting commands for the given address.
+    /// Returns an error if the given adress is invalid.
     /// # Example
     ///
     /// ```
-    /// use x328_proto::{Address, Slave};
-    /// let my_address = Address::new(10).unwrap();
-    /// let mut slave_proto = Slave::new(my_address); // new protocol instance with address 10
+    /// use x328_proto::Slave;
+    /// let mut slave_proto: Slave = Slave::new(10).unwrap(); // new protocol instance with address 10
     /// ```
     pub fn new(address: impl IntoAddress) -> Result<Slave, Error> {
         Ok(ReceiveData::create(address.into_address()?))
