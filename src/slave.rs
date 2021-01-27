@@ -169,7 +169,7 @@ impl ReceiveData {
         use CommandToken::*;
 
         let (token, read_again_param) = loop {
-            match parse_command(self.input_buffer.as_str_slice()) {
+            match parse_command(self.input_buffer.as_ref()) {
                 (0, _) => return self.need_data(),
                 (consumed, token) => {
                     self.input_buffer.consume(consumed);

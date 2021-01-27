@@ -17,7 +17,7 @@ impl Buffer {
     }
 
     pub fn as_str_slice(&self) -> &str {
-        std::str::from_utf8(&self.data[self.read_pos..]).unwrap()
+        std::str::from_utf8(self.as_ref()).unwrap()
     }
 
     pub fn consume(&mut self, len: usize) {
@@ -41,6 +41,12 @@ impl Buffer {
     pub fn clear(&mut self) {
         self.data.clear();
         self.read_pos = 0;
+    }
+}
+
+impl AsRef<[u8]> for Buffer {
+    fn as_ref(&self) -> &[u8] {
+        &self.data[self.read_pos..]
     }
 }
 

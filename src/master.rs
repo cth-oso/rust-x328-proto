@@ -189,7 +189,7 @@ impl<'b> Receiver<'b> for ReceiveWriteResponse<'b> {
         use ResponseToken::*;
         self.buffer.write(data);
 
-        ReceiveDataResult::Done(match parse_write_reponse(self.buffer.as_str_slice()) {
+        ReceiveDataResult::Done(match parse_write_reponse(self.buffer.as_ref()) {
             WriteOk => WriteResult::WriteOk,
             WriteFailed | InvalidParameter => WriteResult::WriteFailed,
             _ => WriteResult::ProtocolError,
@@ -236,7 +236,7 @@ impl<'a> Receiver<'a> for ReceiveReadResponse<'a> {
         use ResponseToken::*;
         self.buffer.write(data);
 
-        ReceiveDataResult::Done(match parse_read_response(self.buffer.as_str_slice()) {
+        ReceiveDataResult::Done(match parse_read_response(self.buffer.as_ref()) {
             NeedData => return ReceiveDataResult::NeedData(self),
             ReadOK { parameter, value } if (parameter == self.expected_param) => {
                 self.master.read_again = Some((self.address, parameter));

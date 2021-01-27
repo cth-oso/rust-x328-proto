@@ -11,7 +11,8 @@ use nom::IResult;
 
 use crate::types::{self, Address, Parameter, ParameterOffset, Value};
 
-type Buf = str;
+type Char = u8;
+type Buf = [u8];
 
 #[derive(Debug, Snafu)]
 #[non_exhaustive]
@@ -97,7 +98,7 @@ pub(crate) mod slave {
     }
 
     fn read_until_eot(buf: &Buf) -> IResult<&Buf, CommandToken> {
-        let (buf, _) = take_while(|c| c != EOT.as_char())(buf)?;
+        let (buf, _) = take_while(|c| c != EOT.as_byte())(buf)?;
         alt_match(buf)
     }
 
@@ -124,9 +125,9 @@ pub(crate) mod slave {
     fn invalid_payload(buf: &Buf) -> IResult<&Buf, CommandToken> {
         let (buf, _eot) = ascii_char(EOT)(buf)?;
         if let (_buf, Some(addr)) = opt(address)(buf)? {
-            Ok(("", InvalidPayload(addr)))
+            Ok((b"", InvalidPayload(addr)))
         } else {
-            Ok(("", NeedData))
+            Ok((b"", NeedData))
         }
     }
 
@@ -135,16 +136,16 @@ pub(crate) mod slave {
     }
 
     fn address(buf: &Buf) -> IResult<&Buf, Address> {
-        map_res::<_, _, _, _, Error, _, _>(
-            take_while_m_n(4, 4, |c: char| c.is_ascii_digit()),
-            |x: &str| {
+        map_res(
+            take_while_m_n(4, 4, |c: Char| c.is_ascii_digit()),
+            |x: &Buf| {
                 ensure!(
                     x[0..1] == x[1..2] && x[2..3] == x[3..],
                     InvalidAddress {
-                        address: x.to_owned()
+                        address: String::from_utf8_lossy(x)
                     }
                 );
-                Ok(x[1..3].parse::<Address>()?)
+                Result::<_, Error>::Ok(Address::new((x[1] - b'0') * 10 + x[2] - b'0')?)
             },
         )(buf)
     }
@@ -168,20 +169,20 @@ pub(crate) mod slave {
             use slave::*;
             let mut buf = Buffer::new();
             buf.write(b"0");
-            assert_eq!(parse_command(buf.as_str_slice()), (0, NeedData));
+            assert_eq!(parse_command(buf.as_ref()), (0, NeedData));
 
-            assert_eq!(parse_command("\x15"), (1, ReadAgain(0)));
-            assert_eq!(parse_command("\x08"), (1, ReadAgain(-1)));
-            assert_eq!(parse_command("\x06"), (1, ReadAgain(1)));
+            assert_eq!(parse_command(b"\x15"), (1, ReadAgain(0)));
+            assert_eq!(parse_command(b"\x08"), (1, ReadAgain(-1)));
+            assert_eq!(parse_command(b"\x06"), (1, ReadAgain(1)));
         }
 
         #[test]
         fn test_address() {
             use slave::address;
-            assert_eq!(address("11223"), Ok(("3", Address::new(12).unwrap())));
-            assert!(address("1132").is_err());
-            assert!(address("aa22").is_err());
-            assert_eq!(address("122"), incomplete!(1));
+            assert!(address(b"11223") == Ok((b"3", Address::new(12).unwrap())));
+            assert!(address(b"1132").is_err());
+            assert!(address(b"aa22").is_err());
+            assert_eq!(address(b"122"), incomplete!(1));
         }
 
         #[test]
@@ -198,7 +199,7 @@ pub(crate) mod slave {
             }
             macro_rules! write {
                 () => {
-                    write_command(cmd.as_str())
+                    write_command(cmd.as_bytes())
                 };
             }
 
@@ -213,17 +214,17 @@ pub(crate) mod slave {
 
             let correct_bcc = AsciiChar::from_ascii(crate::bcc(&(cmd.as_bytes()[6..]))).unwrap();
             cmd.push(correct_bcc);
-            assert_eq!(write!(), Ok(("", WriteParameter(addr, param, value))));
+            assert!(write!() == Ok((b"", WriteParameter(addr, param, value))));
             let x = cmd.len() - 1;
             cmd[x] = EOT; // Invalid BCC
             assert_eq!(
-                parse_command(cmd.as_str()),
+                parse_command(cmd.as_ref()),
                 (cmd.len(), InvalidPayload(addr))
             );
 
             cmd[x] = correct_bcc; // Valid BCC
             push!("asd");
-            assert_eq!(write!(), Ok(("asd", WriteParameter(addr, param, value))));
+            assert!(write!() == Ok((b"asd", WriteParameter(addr, param, value))));
         }
 
         #[test]
@@ -236,7 +237,7 @@ pub(crate) mod slave {
             }
             macro_rules! rue {
                 () => {
-                    read_until_eot(cmd.as_str())
+                    read_until_eot(cmd.as_bytes())
                 };
             }
 
@@ -251,12 +252,12 @@ pub(crate) mod slave {
 }
 
 fn parameter(buf: &Buf) -> IResult<&Buf, Parameter> {
-    map_int(take_while_m_n(4, 4, |c: char| c.is_ascii_digit()))(buf)
+    map_int(take_while_m_n(4, 4, |c: Char| c.is_ascii_digit()))(buf)
 }
 
 fn x328_value(buf: &Buf) -> IResult<&Buf, Value> {
-    map_int(take_while_m_n(1, 6, |c: char| {
-        c.is_ascii_digit() || c == '+' || c == '-'
+    map_int(take_while_m_n(1, 6, |c: Char| {
+        c.is_ascii_digit() || c == b'+' || c == b'-'
     }))(buf)
 }
 
@@ -265,7 +266,7 @@ fn bcc_fields(s: &Buf) -> IResult<&Buf, (Parameter, Value)> {
 }
 
 fn received_bcc(buf: &Buf) -> IResult<&Buf, u8> {
-    map(take(1usize), |u: &Buf| u.as_bytes()[0])(buf)
+    map(take(1usize), |u: &Buf| u[0])(buf)
 }
 
 fn stx_param_value_etx_bcc(buf: &Buf) -> IResult<&Buf, (Parameter, Value)> {
@@ -288,13 +289,15 @@ where
     F: Fn(&'a Buf) -> IResult<&'a Buf, &'a Buf, E>,
     O: std::str::FromStr,
 {
-    //let to_str = map_res(first, |u: &'a Buf| std::str::from_utf8(u));  // for [u8] buffer
-    let to_str = first;
+    // for [u8] buffer
+    let to_str = map_res(first, |u: &'a Buf| std::str::from_utf8(u));
+    // for &str buffer
+    //let to_str = first;
     map_res(to_str, |s| s.parse::<O>())
 }
 
 fn bcc(s: &Buf) -> u8 {
-    crate::bcc(s.as_bytes())
+    crate::bcc(s)
 }
 
 #[cfg(test)]
