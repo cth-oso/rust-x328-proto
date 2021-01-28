@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
-use nom::lib::std::collections::VecDeque;
 use std::cell::RefCell;
 use std::cmp::min;
+use std::collections::VecDeque;
 use std::io::{Error, ErrorKind, Write};
 use std::rc::Rc;
 use std::sync::{Arc, Condvar, Mutex, Weak};
