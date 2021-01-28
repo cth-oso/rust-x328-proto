@@ -1,13 +1,13 @@
-use ascii::AsciiChar::{BackSpace, ACK, ENQ, EOT, ETX, NAK, SOX};
+use arrayvec::ArrayVec;
 use snafu::Snafu;
 
 use std::fmt::{Debug, Formatter};
 
+use crate::ascii::*;
 use crate::bcc;
 use crate::buffer::Buffer;
 use crate::nom_parser::master::{parse_read_response, parse_write_reponse, ResponseToken};
 use crate::types::{self, Address, Parameter, Value};
-use arrayvec::ArrayVec;
 
 #[derive(Debug, Snafu)]
 #[non_exhaustive]
@@ -60,12 +60,12 @@ impl Master {
     ) -> SendData<ReceiveWriteResponse<'_>> {
         self.read_again = None;
         let mut data = SendDataStore::new();
-        data.push(EOT.as_byte());
+        data.push(EOT);
         data.try_extend_from_slice(&address.to_bytes()).unwrap();
-        data.push(SOX.as_byte());
+        data.push(STX);
         data.try_extend_from_slice(&parameter.to_bytes()).unwrap();
         data.try_extend_from_slice(&value.to_bytes()).unwrap();
-        data.push(ETX.as_byte());
+        data.push(ETX);
         data.push(bcc(&data[6..]));
         SendData::new(data, ReceiveWriteResponse::new(self))
     }
@@ -79,10 +79,10 @@ impl Master {
         if let Some(again) = self.try_read_again(address, parameter) {
             data.push(again);
         } else {
-            data.push(EOT.as_byte());
+            data.push(EOT);
             data.try_extend_from_slice(&address.to_bytes()).unwrap();
             data.try_extend_from_slice(&parameter.to_bytes()).unwrap();
-            data.push(ENQ.as_byte());
+            data.push(ENQ);
         }
         SendData::new(data, ReceiveReadResponse::new(self, address, parameter))
     }
@@ -93,9 +93,9 @@ impl Master {
         let (old_addr, old_param) = self.read_again.take()?;
         if old_addr == address && self.get_slave_capabilites(address).can_read_again {
             match *parameter - *old_param {
-                0 => Some(NAK.as_byte()),
-                1 => Some(ACK.as_byte()),
-                -1 => Some(BackSpace.as_byte()),
+                0 => Some(NAK),
+                1 => Some(ACK),
+                -1 => Some(BS),
                 _ => None,
             }
         } else {
@@ -443,7 +443,7 @@ mod tests {
         idle.set_slave_capabilites(addr, true);
         idle.read_again = Some((addr, param));
         let send = idle.read_parameter(addr, param.checked_add(1)?);
-        assert_eq!(send.as_slice(), [ACK.as_byte()]);
+        assert_eq!(send.as_slice(), [ACK]);
         Ok(())
     }
 }

@@ -1,16 +1,8 @@
 //! See Slave for more details.
 
-use ascii::AsciiChar;
 use snafu::Snafu;
 
-const ACK: u8 = AsciiChar::ACK.as_byte();
-// const BS: u8 = AsciiChar::BackSpace.as_byte();
-// const ENQ: u8 = AsciiChar::ENQ.as_byte();
-const EOT: u8 = AsciiChar::EOT.as_byte();
-const ETX: u8 = AsciiChar::ETX.as_byte();
-const NAK: u8 = AsciiChar::NAK.as_byte();
-const STX: u8 = AsciiChar::SOX.as_byte();
-
+use crate::ascii::*;
 use crate::bcc;
 use crate::buffer::Buffer;
 use crate::nom_parser::slave::{parse_command, CommandToken};

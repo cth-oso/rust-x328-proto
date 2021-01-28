@@ -1,5 +1,3 @@
-use ascii::AsciiChar::{self, BackSpace, ACK, ENQ, EOT, ETX, NAK, SOX as STX};
-
 use nom::branch::alt;
 use nom::bytes::streaming::{take_while, take_while_m_n};
 use nom::combinator::{consumed, map, map_res, opt, value, verify};
@@ -8,6 +6,7 @@ use nom::sequence::{preceded, terminated, tuple};
 use nom::Err::Incomplete;
 use nom::IResult;
 
+use crate::ascii::*;
 use crate::types::{Address, Parameter, ParameterOffset, Value};
 
 type Char = u8;
@@ -85,7 +84,7 @@ pub(crate) mod slave {
     }
 
     fn read_until_eot(buf: &Buf) -> IResult<&Buf, CommandToken> {
-        let (buf, _) = take_while(|c| c != EOT.as_byte())(buf)?;
+        let (buf, _) = take_while(|c| c != EOT)(buf)?;
         alt_match(buf)
     }
 
@@ -105,7 +104,7 @@ pub(crate) mod slave {
         alt((
             value(ReadAgain(1), ascii_char(ACK)),
             value(ReadAgain(0), ascii_char(NAK)),
-            value(ReadAgain(-1), ascii_char(BackSpace)),
+            value(ReadAgain(-1), ascii_char(BS)),
         ))(buf)
     }
 
@@ -135,9 +134,9 @@ pub(crate) mod slave {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use crate::ascii::EOT;
         use crate::buffer::Buffer;
-        use ascii::AsciiChar::EOT;
-        use ascii::{AsAsciiStr, AsciiString};
+
         use nom::Needed;
 
         macro_rules! incomplete {
@@ -169,32 +168,32 @@ pub(crate) mod slave {
 
         #[test]
         fn test_write_command() {
-            let mut cmd = AsciiString::new();
+            let mut cmd = Vec::<u8>::new();
             let addr = Address::new(10).unwrap();
             let param = Parameter::new(1234).unwrap();
             let value = Value::new(12345).unwrap();
 
             macro_rules! push {
                 ($x:expr) => {
-                    cmd.push_str($x.as_ascii_str().unwrap());
+                    cmd.extend_from_slice($x);
                 };
             }
             macro_rules! write {
                 () => {
-                    write_command(cmd.as_bytes())
+                    write_command(cmd.as_ref())
                 };
             }
 
             cmd.push(EOT);
-            push!(addr.to_bytes());
+            push!(&addr.to_bytes());
             cmd.push(STX);
 
             assert_eq!(write!(), incomplete!(4));
 
-            push!("123412345\x03");
+            push!(b"123412345\x03");
             assert_eq!(write!(), incomplete!(1)); // missing bcc
 
-            let correct_bcc = AsciiChar::from_ascii(crate::bcc(&(cmd.as_bytes()[6..]))).unwrap();
+            let correct_bcc = crate::bcc(&(cmd.as_slice()[6..]));
             cmd.push(correct_bcc);
             assert!(write!() == Ok((b"", WriteParameter(addr, param, value))));
             let x = cmd.len() - 1;
@@ -205,21 +204,21 @@ pub(crate) mod slave {
             );
 
             cmd[x] = correct_bcc; // Valid BCC
-            push!("asd");
+            push!(b"asd");
             assert!(write!() == Ok((b"asd", WriteParameter(addr, param, value))));
         }
 
         #[test]
         fn test_read_until_eot() {
-            let mut cmd = AsciiString::new();
+            let mut cmd = Vec::<u8>::new();
             macro_rules! push {
                 ($x:expr) => {
-                    cmd.push_str($x.as_ascii_str().unwrap());
+                    cmd.extend_from_slice($x.as_bytes());
                 };
             }
             macro_rules! rue {
                 () => {
-                    read_until_eot(cmd.as_bytes())
+                    read_until_eot(cmd.as_slice())
                 };
             }
 
@@ -253,9 +252,8 @@ fn stx_param_value_etx_bcc(buf: &Buf) -> IResult<&Buf, (Parameter, Value)> {
     Ok((buf, (param, value)))
 }
 
-fn ascii_char<'a>(ascii_char: AsciiChar) -> impl Fn(&'a Buf) -> IResult<&'a Buf, char> {
-    use nom::character::streaming;
-    streaming::char(ascii_char.as_char())
+fn ascii_char<'a>(ascii_char: u8) -> impl Fn(&'a Buf) -> IResult<&'a Buf, char> {
+    nom::character::streaming::char(ascii_char as char)
 }
 
 fn map_int<'a, O, F>(first: F) -> impl FnMut(&'a Buf) -> IResult<&'a Buf, O>

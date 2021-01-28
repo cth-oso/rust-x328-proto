@@ -15,6 +15,22 @@ mod buffer;
 mod nom_parser;
 mod types;
 
+mod ascii {
+    /// Acknowledge
+    pub const ACK: u8 = 6;
+    /// Backspace
+    pub const BS: u8 = 8;
+    /// Enquiry, terminates a parameter read
+    pub const ENQ: u8 = 5;
+    /// "End of transmission", sent as first byte of each command
+    pub const EOT: u8 = 4;
+    /// End of text, sent after parameter value
+    pub const ETX: u8 = 3;
+    /// Negative ACK
+    pub const NAK: u8 = 21;
+    /// Start of text, separates address and parameter in a write command
+    pub const STX: u8 = 2;
+}
 
 /// Calculates the BCC checksum according to the X3.28 spec.
 pub(crate) fn bcc(data: &[u8]) -> u8 {
