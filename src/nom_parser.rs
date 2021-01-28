@@ -1,30 +1,17 @@
 use ascii::AsciiChar::{self, BackSpace, ACK, ENQ, EOT, ETX, NAK, SOX as STX};
-use snafu::{ensure, Backtrace, Snafu};
 
 use nom::branch::alt;
-use nom::bytes::streaming::{take, take_while, take_while_m_n};
-use nom::combinator::{map, map_res, opt, peek, recognize, value, verify};
-use nom::error::ParseError;
-use nom::sequence::{pair, preceded, terminated, tuple};
+use nom::bytes::streaming::{take_while, take_while_m_n};
+use nom::combinator::{consumed, map, map_res, opt, value, verify};
+use nom::number::streaming::u8;
+use nom::sequence::{preceded, terminated, tuple};
 use nom::Err::Incomplete;
 use nom::IResult;
 
-use crate::types::{self, Address, Parameter, ParameterOffset, Value};
+use crate::types::{Address, Parameter, ParameterOffset, Value};
 
 type Char = u8;
 type Buf = [u8];
-
-#[derive(Debug, Snafu)]
-#[non_exhaustive]
-pub enum Error {
-    #[snafu(display("Invalid type {}", source), context(false))]
-    InvalidType { source: types::Error },
-    #[snafu(display("Invalid address {}", address))]
-    InvalidAddress {
-        address: String,
-        backtrace: Backtrace,
-    },
-}
 
 pub(crate) mod master {
     use super::*;
@@ -137,16 +124,11 @@ pub(crate) mod slave {
 
     fn address(buf: &Buf) -> IResult<&Buf, Address> {
         map_res(
-            take_while_m_n(4, 4, |c: Char| c.is_ascii_digit()),
-            |x: &Buf| {
-                ensure!(
-                    x[0..1] == x[1..2] && x[2..3] == x[3..],
-                    InvalidAddress {
-                        address: String::from_utf8_lossy(x)
-                    }
-                );
-                Result::<_, Error>::Ok(Address::new((x[1] - b'0') * 10 + x[2] - b'0')?)
-            },
+            verify(
+                take_while_m_n(4, 4, |c: Char| c.is_ascii_digit()),
+                |x: &Buf| x[0] == x[1] && x[2] == x[3],
+            ),
+            |x: &Buf| Address::new((x[1] - b'0') * 10 + x[2] - b'0'),
         )(buf)
     }
 
@@ -256,29 +238,22 @@ fn parameter(buf: &Buf) -> IResult<&Buf, Parameter> {
 }
 
 fn x328_value(buf: &Buf) -> IResult<&Buf, Value> {
-    map_int(take_while_m_n(1, 6, |c: Char| {
-        c.is_ascii_digit() || c == b'+' || c == b'-'
-    }))(buf)
-}
-
-fn bcc_fields(s: &Buf) -> IResult<&Buf, (Parameter, Value)> {
-    terminated(tuple((parameter, x328_value)), ascii_char(ETX))(s)
-}
-
-fn received_bcc(buf: &Buf) -> IResult<&Buf, u8> {
-    map(take(1usize), |u: &Buf| u[0])(buf)
+    terminated(
+        map_int(take_while_m_n(1, 6, |c: Char| {
+            c.is_ascii_digit() || c == b'+' || c == b'-'
+        })),
+        ascii_char(ETX),
+    )(buf)
 }
 
 fn stx_param_value_etx_bcc(buf: &Buf) -> IResult<&Buf, (Parameter, Value)> {
     let (buf, _stx) = ascii_char(STX)(buf)?;
-    let (buf, ((param, value), bcc_slice)) = pair(peek(bcc_fields), recognize(bcc_fields))(buf)?;
-    let (buf, _) = verify(received_bcc, |recv_bcc| bcc(bcc_slice) == *recv_bcc)(buf)?;
+    let (buf, (bcc_slice, (param, value))) = consumed(tuple((parameter, x328_value)))(buf)?;
+    let (buf, _) = verify(u8, |recv_bcc| bcc(bcc_slice) == *recv_bcc)(buf)?;
     Ok((buf, (param, value)))
 }
 
-fn ascii_char<'a, E: ParseError<&'a Buf>>(
-    ascii_char: AsciiChar,
-) -> impl Fn(&'a Buf) -> IResult<&'a Buf, char, E> {
+fn ascii_char<'a>(ascii_char: AsciiChar) -> impl Fn(&'a Buf) -> IResult<&'a Buf, char> {
     use nom::character::streaming;
     streaming::char(ascii_char.as_char())
 }
