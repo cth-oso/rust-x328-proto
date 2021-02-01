@@ -432,6 +432,12 @@ impl PartialEq for Value {
     }
 }
 
+impl PartialEq<i32> for Value {
+    fn eq(&self, other: &i32) -> bool {
+        self.0 == *other
+    }
+}
+
 impl Deref for Value {
     type Target = i32;
 
