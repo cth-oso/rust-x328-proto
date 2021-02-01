@@ -1,5 +1,5 @@
 use nom::branch::alt;
-use nom::bytes::streaming::{take_while, take_while_m_n};
+use nom::bytes::streaming::take_while_m_n;
 use nom::combinator::{consumed, map, map_res, opt, value, verify};
 use nom::number::streaming::u8;
 use nom::sequence::{preceded, terminated, tuple};
@@ -66,26 +66,24 @@ pub(crate) mod slave {
     }
 
     pub(crate) fn parse_command(buf: &Buf) -> (usize, CommandToken) {
-        match alt_match(buf) {
-            Ok((remaining, token)) => (buf.len() - remaining.len(), token),
-            Err(Incomplete(_)) => (0, CommandToken::NeedData),
-            Err(_) => panic!("Wut??"),
+        let (remaining, token) = alt_match(buf);
+        (buf.len() - remaining.len(), token)
+    }
+
+    fn alt_match(buf: &Buf) -> (&Buf, CommandToken) {
+        if let Ok(x) = read_again(buf) {
+            return x;
         }
+        let buf = find_last_eot(buf);
+        alt((write_command, read_command, invalid_payload))(buf)
+            .unwrap_or((buf, CommandToken::NeedData))
     }
 
-    fn alt_match(buf: &Buf) -> IResult<&Buf, CommandToken> {
-        alt((
-            read_again,
-            write_command,
-            read_command,
-            invalid_payload,
-            read_until_eot,
-        ))(buf)
-    }
-
-    fn read_until_eot(buf: &Buf) -> IResult<&Buf, CommandToken> {
-        let (buf, _) = take_while(|c| c != EOT)(buf)?;
-        alt_match(buf)
+    /// Consumes the buffer until the last EOT is found
+    fn find_last_eot(buf: &Buf) -> &Buf {
+        buf.iter()
+            .rposition(|c| *c == EOT)
+            .map_or(b"", |pos| &buf[pos..])
     }
 
     fn read_command(buf: &Buf) -> IResult<&Buf, CommandToken> {
@@ -109,12 +107,10 @@ pub(crate) mod slave {
     }
 
     fn invalid_payload(buf: &Buf) -> IResult<&Buf, CommandToken> {
-        let (buf, _eot) = ascii_char(EOT)(buf)?;
-        if let (_buf, Some(addr)) = opt(address)(buf)? {
-            Ok((b"", InvalidPayload(addr)))
-        } else {
-            Ok((b"", NeedData))
-        }
+        let (buf, addr) = preceded(ascii_char(EOT), opt(address))(buf)?;
+        let buf = find_last_eot(buf);
+        let tok = addr.map_or(CommandToken::NeedData, CommandToken::InvalidPayload);
+        Ok((buf, tok))
     }
 
     fn eot_address(buf: &Buf) -> IResult<&Buf, Address> {
@@ -150,7 +146,7 @@ pub(crate) mod slave {
             use slave::*;
             let mut buf = Buffer::new();
             buf.write(b"0");
-            assert_eq!(parse_command(buf.as_ref()), (0, NeedData));
+            assert_eq!(parse_command(buf.as_ref()), (1, NeedData));
 
             assert_eq!(parse_command(b"\x15"), (1, ReadAgain(0)));
             assert_eq!(parse_command(b"\x08"), (1, ReadAgain(-1)));
@@ -197,7 +193,7 @@ pub(crate) mod slave {
             cmd.push(correct_bcc);
             assert!(write!() == Ok((b"", WriteParameter(addr, param, value))));
             let x = cmd.len() - 1;
-            cmd[x] = EOT; // Invalid BCC
+            cmd[x] = correct_bcc + 1; // Invalid BCC
             assert_eq!(
                 parse_command(cmd.as_ref()),
                 (cmd.len(), InvalidPayload(addr))
@@ -206,28 +202,6 @@ pub(crate) mod slave {
             cmd[x] = correct_bcc; // Valid BCC
             push!(b"asd");
             assert!(write!() == Ok((b"asd", WriteParameter(addr, param, value))));
-        }
-
-        #[test]
-        fn test_read_until_eot() {
-            let mut cmd = Vec::<u8>::new();
-            macro_rules! push {
-                ($x:expr) => {
-                    cmd.extend_from_slice($x.as_bytes());
-                };
-            }
-            macro_rules! rue {
-                () => {
-                    read_until_eot(cmd.as_slice())
-                };
-            }
-
-            push!("asdjkhalksdjfhalskdfjha");
-            assert_eq!(rue!(), incomplete!(1));
-            cmd.push(EOT);
-            assert_eq!(rue!(), incomplete!(4));
-            push!("1122123");
-            assert_eq!(rue!(), incomplete!(1));
         }
     }
 }
@@ -273,4 +247,216 @@ fn bcc(s: &Buf) -> u8 {
 }
 
 #[cfg(test)]
-mod tests {}
+mod test_public_interface {
+    use crate::ascii::*;
+    use crate::bcc;
+
+    /// Push parameter, value, bcc to the buffer
+    macro_rules! push_spveb {
+        ($buf:expr, $param:expr, $value:expr) => {
+            $buf.push(STX);
+            let bcc_start = $buf.len();
+            $buf.extend_from_slice($param);
+            $buf.extend_from_slice($value);
+            $buf.push(ETX);
+            $buf.push(bcc(&($buf)[bcc_start..]));
+        };
+    }
+
+    #[test]
+    fn read_command() {
+        use super::slave::{parse_command, CommandToken};
+
+        let mut buf = vec![EOT];
+        buf.extend_from_slice(b"1199"); // address
+        buf.extend_from_slice(b"0010"); // parameter
+        let enq_pos = buf.len();
+        buf.push(ENQ);
+
+        // Valid read command, with trailing data
+        match parse_command(&buf) {
+            (10, CommandToken::ReadParameter(addr, param)) => {
+                assert_eq!(addr, 19);
+                assert_eq!(param, 10);
+            }
+            tok => panic!("Invalid token {:?}", tok),
+        }
+
+        // Valid command, short read
+        for len in 0..enq_pos {
+            assert_eq!(parse_command(&buf[..len]), (0, CommandToken::NeedData));
+        }
+
+        // Corrupted parameter or ENQ byte
+        for n in 5..=enq_pos {
+            let old = buf[n];
+            buf[n] = b'A';
+            match parse_command(&buf) {
+                (consumed, CommandToken::InvalidPayload(addr)) => {
+                    assert_eq!(addr, 19);
+                    assert_eq!(consumed, enq_pos + 1);
+                }
+                tok => panic!("Invalid token {:?}", tok),
+            }
+            buf[n] = old;
+        }
+
+        // corrupted EOT
+        buf[0] += 1;
+        match parse_command(&buf) {
+            (10, CommandToken::NeedData) => {}
+            tok => panic!("Invalid token {:?}", tok),
+        }
+        buf[0] -= 1;
+        // corrupted address
+        buf[1] += 1;
+        match parse_command(&buf) {
+            (10, CommandToken::NeedData) => {}
+            tok => panic!("Invalid token {:?}", tok),
+        }
+        buf[1] -= 1;
+    }
+
+    #[test]
+    /// Test that parsing recovers if a command is interrupted
+    /// and a new command is transmitted
+    fn overlapping_commands() {
+        use super::slave::{parse_command, CommandToken};
+
+        let mut read_cmd = vec![EOT];
+        read_cmd.extend_from_slice(b"1199"); // address
+        read_cmd.extend_from_slice(b"0010"); // parameter
+        read_cmd.push(ENQ);
+
+        for brk in 1..(read_cmd.len() - 1) {
+            let buf: Vec<_> = read_cmd[..brk]
+                .iter()
+                .copied()
+                .chain(read_cmd.iter().copied())
+                .collect();
+            match parse_command(&buf) {
+                (consumed, CommandToken::ReadParameter(_, _)) => assert_eq!(consumed, buf.len()),
+                t => panic!("{:?}", t),
+            }
+        }
+    }
+
+    #[test]
+    fn read_response() {
+        use super::master::{parse_read_response, ResponseToken};
+
+        let mut buf = Vec::new();
+        push_spveb!(buf, b"1234", b"-54321");
+
+        let bcc_pos = buf.len() - 1;
+        macro_rules! invalid_data {
+            ($pre:expr, $post:expr) => {
+                $pre;
+                assert_eq!(
+                    parse_read_response(&buf),
+                    ResponseToken::InvalidDataReceived
+                );
+                $post;
+            };
+        }
+
+        // Valid response
+        match parse_read_response(&buf) {
+            ResponseToken::ReadOK { parameter, value } => {
+                assert_eq!(parameter, 1234);
+                assert_eq!(value, -54321);
+            }
+            _ => panic!("Invalid response"),
+        }
+
+        // Valid response, short read
+        for len in 0..(buf.len() - 1) {
+            let x = parse_read_response(&buf[..len]);
+            assert_eq!(x, ResponseToken::NeedData);
+        }
+
+        // Trailing data
+        invalid_data!(buf.push(0), buf.pop());
+
+        // BCC checksum mismatch
+        invalid_data!(buf[bcc_pos] += 1, buf[bcc_pos] -= 1);
+
+        // STX -> NAK
+        invalid_data!(buf[0] = NAK, buf[0] = STX);
+
+        // STX -> EOT
+        invalid_data!(buf[0] = EOT, buf[0] = STX);
+
+        // bad parameter
+        assert_eq!(parse_read_response(&[EOT]), ResponseToken::InvalidParameter);
+        assert_eq!(
+            parse_read_response(&[EOT, EOT]),
+            ResponseToken::InvalidDataReceived
+        );
+    }
+
+    #[test]
+    fn write_command() {
+        use super::slave::{parse_command, CommandToken};
+
+        let mut buf = vec![EOT];
+        buf.extend_from_slice(b"1199"); // address
+        let stx_pos = buf.len();
+        push_spveb!(buf, b"1234", b"-54321");
+        let cmd_len = buf.len();
+
+        // Valid command
+        match parse_command(&buf) {
+            (consumed, CommandToken::WriteParameter(addr, param, val)) => {
+                assert_eq!(consumed, cmd_len);
+                assert_eq!(addr, 19);
+                assert_eq!(param, 1234);
+                assert_eq!(val, -54321);
+            }
+            x => panic!("{:?}", x),
+        };
+
+        // Valid command, short read
+        for n in 0..(cmd_len - 1) {
+            assert_eq!(parse_command(&buf[..n]), (0, CommandToken::NeedData));
+        }
+
+        // Corrupt EOT or addr
+        for n in 0..stx_pos {
+            buf[n] += 1;
+            assert_eq!(parse_command(&buf), (cmd_len, CommandToken::NeedData));
+            buf[n] -= 1;
+        }
+
+        // Corrupt payload
+        for n in stx_pos..cmd_len {
+            buf[n] += 3; // +1 turns ETX => EOT, which gives NeedData instead of InvalidPayload
+            match parse_command(&buf) {
+                (consumed, CommandToken::InvalidPayload(addr))
+                    if consumed == cmd_len && addr == 19 => {}
+                x => panic!("{:?} => {:?}", String::from_utf8_lossy(&buf), x),
+            }
+            buf[n] -= 3;
+        }
+    }
+
+    #[test]
+    fn write_response() {
+        use super::master::{parse_write_reponse, ResponseToken};
+
+        for b in 0u8..=255 {
+            match parse_write_reponse(&[b]) {
+                ResponseToken::WriteOk if b == ACK => {}
+                ResponseToken::WriteFailed if b == NAK => {}
+                ResponseToken::InvalidParameter if b == EOT => {}
+                ResponseToken::InvalidDataReceived if ![ACK, NAK, EOT].contains(&b) => {}
+                tok => panic!("Invalid response token {} => {:?}", b, tok),
+            }
+        }
+
+        assert_eq!(
+            parse_write_reponse(&[ACK, ACK]),
+            ResponseToken::InvalidDataReceived
+        );
+    }
+}
