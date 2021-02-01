@@ -16,10 +16,6 @@ impl Buffer {
         self.data.len() - self.read_pos
     }
 
-    pub fn as_str_slice(&self) -> &str {
-        std::str::from_utf8(self.as_ref()).unwrap()
-    }
-
     pub fn consume(&mut self, len: usize) {
         assert!(len <= self.len());
         self.read_pos += len;
@@ -63,7 +59,6 @@ mod tests {
     #[test]
     fn test_slice() {
         let buf = get_buffer();
-        // print!("{:#?}", buf);
-        assert_eq!(buf.as_str_slice().len(), buf.len());
+        assert_eq!(buf.as_ref().len(), buf.len());
     }
 }
