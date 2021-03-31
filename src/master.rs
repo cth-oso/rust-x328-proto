@@ -412,7 +412,7 @@ mod tests {
         (
             addr.try_into().unwrap(),
             param.try_into().unwrap(),
-            Value::new(val).unwrap(),
+            val.try_into().unwrap(),
         )
     }
 

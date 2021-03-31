@@ -6,9 +6,9 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::thread;
 use std::time::Duration;
 
+use x328_proto::master;
 use x328_proto::master::io::Master;
 use x328_proto::node::{self, BusNode};
-use x328_proto::{master, Value};
 
 use common::{BusInterface, RS422Bus};
 
@@ -70,7 +70,7 @@ fn node_main_loop(mut serial: BusInterface) -> Result<(), node::Error> {
                 if read_command.parameter() == 3 {
                     read_command.send_invalid_parameter()
                 } else {
-                    read_command.send_reply_ok(Value::new(4).unwrap())
+                    read_command.send_reply_ok(4u16.into())
                 }
             }
 

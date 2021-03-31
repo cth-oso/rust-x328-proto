@@ -52,7 +52,7 @@ use crate::types::{self, Address, IntoAddress, Parameter, Value};
 ///                if read_command.parameter() == 3 {
 ///                    read_command.send_invalid_parameter()
 ///                } else {
-///                    read_command.send_reply_ok(Value::new(4).unwrap())
+///                    read_command.send_reply_ok(4u16.into())
 ///                }
 ///            }
 ///

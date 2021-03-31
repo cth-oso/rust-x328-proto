@@ -275,13 +275,19 @@ pub enum ValueFormat {
     Normal,
 }
 
+/// Value represents an integer that can be sent over the X3.28 protocol.
+///
+/// It is range limited to [-99999, 999999], since the on-wire representation
+/// is limited to six ascii characters.
 #[derive(Debug, Copy, Clone)]
 pub struct Value(i32, ValueFormat);
 
 pub(crate) type ValueBytes = ArrayVec<[u8; 6]>;
 
 impl Value {
-    pub const fn new(value: i32) -> Option<Value> {
+    /// Try to create a Value from the given i32 integer. Returns None if the
+    /// the given integer is out of range.
+    pub const fn try_from_i32(value: i32) -> Option<Value> {
         if value < -99999 || value > 99999 {
             return None;
         }
@@ -295,21 +301,16 @@ impl Value {
         Some(Value(value, fmt))
     }
 
-    pub const fn new_fmt(value: i32, fmt: ValueFormat) -> Option<Value> {
-        let (min, max) = match fmt {
-            ValueFormat::Wide => (-99999, 99999),
-            ValueFormat::Normal => (-9999, 99999),
-        };
-        if value < min || value > max {
-            return None;
-        }
-        Some(Value(value, fmt))
-    }
-
+    /// Returns the contained value as u16 if it can be converted to u16 without truncation.
     pub fn try_u16(&self) -> Option<u16> {
-        self.0.try_into().ok()
+        if (0..=u16::MAX as i32).contains(&self.0) {
+            Some(self.0 as u16)
+        } else {
+            None
+        }
     }
 
+    /// Format the value into the on-wire representation.
     pub(crate) fn to_bytes(&self) -> ValueBytes {
         match self.1 {
             ValueFormat::Wide => {
@@ -383,6 +384,16 @@ where
             }
         };
         Some(Value(value, fmt))
+    }
+}
+
+impl TryFrom<i32> for Value {
+    type Error = Error;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        Value::try_from_i32(value).with_context(|| InvalidValue {
+            value: "".to_string(),
+        })
     }
 }
 

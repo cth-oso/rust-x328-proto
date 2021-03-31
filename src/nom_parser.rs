@@ -167,7 +167,7 @@ pub(crate) mod node {
             let mut cmd = Vec::<u8>::new();
             let addr = Address::new(10).unwrap();
             let param = Parameter::new(1234).unwrap();
-            let value = Value::new(12345).unwrap();
+            let value: Value = 12345_u16.into();
 
             macro_rules! push {
                 ($x:expr) => {
