@@ -48,7 +48,7 @@ fn invalid_parameter<T: ToString>(parameter: T) -> InvalidParameter<String> {
 pub struct Address(u8);
 
 impl Address {
-    /// Create a new address, checking that the address is in [0,99].
+    /// Create a new address, checking that the address is in \[0,99\].
     pub fn new(address: u8) -> Result<Address, Error> {
         ensure!(address <= 99, invalid_address(address));
         Ok(Address(address))
@@ -121,7 +121,7 @@ impl FromStr for Address {
     }
 }
 
-/// Parameter is a range-checked [0,9999] integer, representing a node parameter.
+/// Parameter is a range-checked \[0,9999\] integer, representing a node parameter.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone, Hash)]
 #[repr(transparent)]
 pub struct Parameter(i16);
