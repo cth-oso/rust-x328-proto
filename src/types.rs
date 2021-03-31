@@ -8,30 +8,24 @@ use std::str::FromStr;
 #[derive(Debug, Snafu)]
 #[non_exhaustive]
 pub enum Error {
-    #[snafu(display("Invalid address {}", address))]
-    InvalidAddress {
-        address: String,
-        backtrace: Backtrace,
-    },
-    #[snafu(display("Invalid parameter {}", parameter))]
-    InvalidParameter {
-        parameter: String,
-        backtrace: Backtrace,
-    },
-    #[snafu(display("Invalid value {}", value))]
-    InvalidValue { value: String, backtrace: Backtrace },
+    #[snafu(display("Invalid address"))]
+    InvalidAddress { backtrace: Backtrace },
+    #[snafu(display("Invalid parameter"))]
+    InvalidParameter { backtrace: Backtrace },
+    #[snafu(display("Invalid value"))]
+    InvalidValue { backtrace: Backtrace },
 }
 
-fn invalid_address<T: ToString>(address: T) -> InvalidAddress<String> {
-    InvalidAddress {
-        address: address.to_string(),
-    }
+fn invalid_address() -> InvalidAddress {
+    InvalidAddress {}
 }
 
-fn invalid_parameter<T: ToString>(parameter: T) -> InvalidParameter<String> {
-    InvalidParameter {
-        parameter: parameter.to_string(),
-    }
+fn invalid_parameter() -> InvalidParameter {
+    InvalidParameter {}
+}
+
+fn invalid_value() -> InvalidValue {
+    InvalidValue {}
 }
 
 /// Address is a range-checked [0, 99] integer, representing a node address.
@@ -50,7 +44,7 @@ pub struct Address(u8);
 impl Address {
     /// Create a new address, checking that the address is in \[0,99\].
     pub fn new(address: u8) -> Result<Address, Error> {
-        ensure!(address <= 99, invalid_address(address));
+        ensure!(address <= 99, invalid_address());
         Ok(Address(address))
     }
 
@@ -97,8 +91,7 @@ where
     T: TryInto<Address> + ToString + Clone,
 {
     fn into_address(self) -> Result<Address, Error> {
-        let cpy = self.clone();
-        self.try_into().ok().with_context(|| invalid_address(cpy))
+        self.try_into().ok().with_context(invalid_address)
     }
 }
 
@@ -106,7 +99,7 @@ impl TryFrom<usize> for Address {
     type Error = Error;
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
-        ensure!(value <= 99, invalid_address(value));
+        ensure!(value <= 99, invalid_address());
         Address::new(value as u8)
     }
 }
@@ -116,8 +109,8 @@ impl FromStr for Address {
 
     /// This is meant to be used for parsing the on-wire format
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        ensure!(s.len() == 2, invalid_address(s));
-        Address::new(s.parse().ok().with_context(|| invalid_address(s))?)
+        ensure!(s.len() == 2, invalid_address());
+        Address::new(s.parse().ok().with_context(invalid_address)?)
     }
 }
 
@@ -131,19 +124,12 @@ impl Parameter {
     /// Create a new Parameter, checking that the given value
     /// is in the range [0, 9999].
     pub fn new(parameter: i16) -> Result<Parameter, Error> {
-        ensure!(
-            (0..=9999).contains(&parameter),
-            invalid_parameter(parameter)
-        );
+        ensure!((0..=9999).contains(&parameter), invalid_parameter());
         Ok(Parameter(parameter))
     }
 
     pub(crate) fn checked_add(&self, offset: ParameterOffset) -> Result<Parameter, Error> {
-        Parameter::new(
-            self.0
-                .checked_add(offset)
-                .with_context(|| invalid_parameter("Checked add failed"))?,
-        )
+        Parameter::new(self.0.checked_add(offset).with_context(invalid_parameter)?)
     }
 
     pub(crate) fn to_bytes(&self) -> [u8; 4] {
@@ -186,8 +172,7 @@ where
     T: TryInto<i16> + ToString + Clone,
 {
     fn into_parameter(self) -> Result<Parameter, Error> {
-        let e = self.clone();
-        Parameter::new(self.try_into().ok().with_context(|| invalid_parameter(e))?)
+        Parameter::new(self.try_into().ok().with_context(invalid_parameter)?)
     }
 }
 
@@ -195,7 +180,7 @@ impl TryFrom<usize> for Parameter {
     type Error = Error;
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
-        ensure!(value <= 9999, invalid_parameter(value));
+        ensure!(value <= 9999, invalid_parameter());
         Parameter::new(value as i16)
     }
 }
@@ -205,8 +190,8 @@ impl FromStr for Parameter {
 
     /// This is meant to be used for parsing the on-wire format
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        ensure!(s.len() == 4, invalid_parameter(s));
-        Parameter::new(s.parse().ok().with_context(|| invalid_parameter(s))?)
+        ensure!(s.len() == 4, invalid_parameter());
+        Parameter::new(s.parse().ok().with_context(invalid_parameter)?)
     }
 }
 
@@ -391,9 +376,7 @@ impl TryFrom<i32> for Value {
     type Error = Error;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
-        Value::try_from_i32(value).with_context(|| InvalidValue {
-            value: "".to_string(),
-        })
+        Value::try_from_i32(value).with_context(invalid_value)
     }
 }
 
@@ -421,19 +404,9 @@ impl FromStr for Value {
         let fmt = match s.len() {
             1..=5 => ValueFormat::Normal,
             6 => ValueFormat::Wide,
-            _ => {
-                return InvalidValue {
-                    value: s.to_owned(),
-                }
-                .fail()
-            }
+            _ => return invalid_value().fail(),
         };
-        Ok(Value(
-            s.parse().ok().with_context(|| InvalidValue {
-                value: s.to_owned(),
-            })?,
-            fmt,
-        ))
+        Ok(Value(s.parse().ok().with_context(invalid_value)?, fmt))
     }
 }
 
