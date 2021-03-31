@@ -276,6 +276,12 @@ impl ReadParam {
         SendData::from_state(self.state, vec![EOT])
     }
 
+    /// Inform the bus master that the read request failed
+    /// for some reason other than invalid parameter number.
+    pub fn send_read_failed(self) -> Slave {
+        SendData::from_state(self.state, vec![NAK])
+    }
+
     /// Do not send any reply to the master. Transition to the idle ReceiveData state instead.
     /// You really shouldn't do this, since this will leave the master waiting until it times out.
     pub fn no_reply(self) -> Slave {
