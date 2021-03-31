@@ -2,16 +2,16 @@ use std::collections::HashMap;
 use std::io::{self, Read, Write};
 
 use std::error::Error;
-use x328_proto::{Slave, Value};
+use x328_proto::{BusNode, Value};
 
-fn slave_main_loop() -> Result<(), Box<dyn Error>> {
+fn node_main_loop() -> Result<(), Box<dyn Error>> {
     let mut registers = HashMap::new();
 
-    let mut slave_proto = Slave::new(10)?;
+    let mut node = BusNode::new(10)?;
 
     loop {
-        slave_proto = match slave_proto {
-            Slave::ReceiveData(recv) => {
+        node = match node {
+            BusNode::ReceiveData(recv) => {
                 // print!("Reading one byte from stdin\n");
                 let mut data_in = vec![0];
                 if io::stdin().read(data_in.as_mut_slice())? == 0 {
@@ -20,12 +20,12 @@ fn slave_main_loop() -> Result<(), Box<dyn Error>> {
                 recv.receive_data(&data_in)
             }
 
-            Slave::SendData(mut send) => {
+            BusNode::SendData(mut send) => {
                 io::stdout().write_all(send.send_data().as_ref())?;
                 send.data_sent()
             }
 
-            Slave::ReadParameter(read_command) => {
+            BusNode::ReadParameter(read_command) => {
                 print!("Received read command {:?}", read_command);
                 if read_command.parameter() == 3 {
                     read_command.send_invalid_parameter()
@@ -34,7 +34,7 @@ fn slave_main_loop() -> Result<(), Box<dyn Error>> {
                 }
             }
 
-            Slave::WriteParameter(write_command) => {
+            BusNode::WriteParameter(write_command) => {
                 print!("Received write command at {:?}", write_command);
                 let param = write_command.parameter();
                 if param == 3 {
@@ -50,5 +50,5 @@ fn slave_main_loop() -> Result<(), Box<dyn Error>> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
-    slave_main_loop()
+    node_main_loop()
 }

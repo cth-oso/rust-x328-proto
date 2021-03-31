@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use x328_proto::master::io::Master;
-use x328_proto::slave::{self, Slave};
+use x328_proto::node::{self, BusNode};
 use x328_proto::{master, Value};
 
 use common::{BusInterface, RS422Bus};
@@ -38,15 +38,15 @@ fn master_main_loop(io: BusInterface) -> Result<(), master::io::Error> {
     Ok(())
 }
 
-fn slave_loop(mut serial: BusInterface) -> Result<(), slave::Error> {
-    let mut slave_proto = Slave::new(5)?;
+fn node_main_loop(mut serial: BusInterface) -> Result<(), node::Error> {
+    let mut node = BusNode::new(5)?;
     'main: loop {
         if SHUTDOWN.load(SeqCst) {
             break 'main;
         };
 
-        slave_proto = match slave_proto {
-            Slave::ReceiveData(recv) => {
+        node = match node {
+            BusNode::ReceiveData(recv) => {
                 let mut buf = [0; 1];
                 if let Ok(len) = serial.read(&mut buf) {
                     if len == 0 {
@@ -55,18 +55,18 @@ fn slave_loop(mut serial: BusInterface) -> Result<(), slave::Error> {
                     }
                     recv.receive_data(&buf[..len])
                 } else {
-                    println!("Slave read error");
+                    println!("Node read error");
                     break 'main;
                 }
             }
 
-            Slave::SendData(mut send) => {
-                println!("Slave sending data");
+            BusNode::SendData(mut send) => {
+                println!("Node sending data");
                 serial.write_all(send.send_data().as_ref()).unwrap();
                 send.data_sent()
             }
 
-            Slave::ReadParameter(read_command) => {
+            BusNode::ReadParameter(read_command) => {
                 if read_command.parameter() == 3 {
                     read_command.send_invalid_parameter()
                 } else {
@@ -74,14 +74,14 @@ fn slave_loop(mut serial: BusInterface) -> Result<(), slave::Error> {
                 }
             }
 
-            Slave::WriteParameter(write_command) => {
+            BusNode::WriteParameter(write_command) => {
                 let param = write_command.parameter();
                 println!("Write to parameter {:?}", param);
                 write_command.write_ok()
             }
         };
     }
-    println!("Slave terminating");
+    println!("Node terminating");
     Ok(())
 }
 
@@ -95,10 +95,10 @@ fn chat1() {
     let mut master_if = bus.new_master_interface();
     master_if.timeout = Duration::from_millis(100);
 
-    let mut slave_if = bus.new_slave_interface();
-    slave_if.timeout = Duration::from_secs(100);
+    let mut node_if = bus.new_node_interface();
+    node_if.timeout = Duration::from_secs(100);
     let master = thread::spawn(move || master_main_loop(master_if));
-    let slave = thread::spawn(move || slave_loop(slave_if));
+    let node = thread::spawn(move || node_main_loop(node_if));
 
     master
         .join()
@@ -107,11 +107,10 @@ fn chat1() {
     println!("Master joined");
 
     SHUTDOWN.store(true, SeqCst);
-    bus.wake_blocked_slaves();
+    bus.wake_blocked_nodes();
 
-    slave
-        .join()
-        .expect("Slave paniced")
-        .expect("Slave returned an error");
-    println!("Slave joined")
+    node.join()
+        .expect("Node paniced")
+        .expect("Node returned an error");
+    println!("Node joined")
 }

@@ -32,7 +32,7 @@ fn master_main_loop() {
 fn test_write() {
     let bus = RS422Bus::new();
     let mut master = io::Master::new(bus.new_master_interface());
-    let mut response = bus.new_slave_interface();
+    let mut response = bus.new_node_interface();
     response.putc(ACK);
     assert!(master.write_parameter(10, 20, 30).is_ok());
     assert!(master.write_parameter(100, 22, 32).is_err());

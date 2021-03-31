@@ -5,10 +5,10 @@
 //! Since this crate doesn't provide IO at all, feel free to use whatever transport you want.
 
 pub mod master;
-pub mod slave;
+pub mod node;
 
 pub use master::Master;
-pub use slave::Slave;
+pub use node::BusNode;
 pub use types::{Address, IntoAddress, IntoParameter, IntoValue, Parameter, Value};
 
 mod buffer;

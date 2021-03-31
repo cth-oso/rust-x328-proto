@@ -3,20 +3,20 @@ mod common;
 use common::{SerialIOPlane, SerialInterface};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use x328_proto::{slave::Slave, Parameter, Value};
+use x328_proto::{node::BusNode, Parameter, Value};
 
 #[test]
-fn slave_main_loop() {
+fn node_main_loop() {
     let data_in = b"asd";
     let serial_sim = SerialInterface::new(data_in);
     let mut serial = SerialIOPlane::new(&serial_sim);
     let mut registers: HashMap<Parameter, Value> = HashMap::new();
 
-    let mut slave_proto = Slave::new(10).unwrap();
+    let mut node = BusNode::new(10).unwrap();
 
     'main: loop {
-        slave_proto = match slave_proto {
-            Slave::ReceiveData(recv) => {
+        node = match node {
+            BusNode::ReceiveData(recv) => {
                 let mut buf = [0; 1];
                 if let Ok(len) = serial.read(&mut buf) {
                     if len == 0 {
@@ -28,12 +28,12 @@ fn slave_main_loop() {
                 }
             }
 
-            Slave::SendData(mut send) => {
+            BusNode::SendData(mut send) => {
                 serial.write_all(send.send_data().as_ref()).unwrap();
                 send.data_sent()
             }
 
-            Slave::ReadParameter(read_command) => {
+            BusNode::ReadParameter(read_command) => {
                 if read_command.parameter() == 3 {
                     read_command.send_invalid_parameter()
                 } else {
@@ -41,7 +41,7 @@ fn slave_main_loop() {
                 }
             }
 
-            Slave::WriteParameter(write_command) => {
+            BusNode::WriteParameter(write_command) => {
                 let param = write_command.parameter();
                 if param == 3 {
                     write_command.write_error()

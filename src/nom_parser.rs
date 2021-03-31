@@ -52,7 +52,7 @@ pub(crate) mod master {
     }
 }
 
-pub(crate) mod slave {
+pub(crate) mod node {
     use super::*;
     use CommandToken::*;
 
@@ -143,7 +143,7 @@ pub(crate) mod slave {
 
         #[test]
         fn test_parse_command() {
-            use slave::*;
+            use node::*;
             let mut buf = Buffer::new();
             buf.write(b"0");
             assert_eq!(parse_command(buf.as_ref()), (1, NeedData));
@@ -155,7 +155,7 @@ pub(crate) mod slave {
 
         #[test]
         fn test_address() {
-            use slave::address;
+            use node::address;
             assert!(address(b"11223") == Ok((b"3", Address::new(12).unwrap())));
             assert!(address(b"1132").is_err());
             assert!(address(b"aa22").is_err());
@@ -265,7 +265,7 @@ mod test_public_interface {
 
     #[test]
     fn read_command() {
-        use super::slave::{parse_command, CommandToken};
+        use super::node::{parse_command, CommandToken};
 
         let mut buf = vec![EOT];
         buf.extend_from_slice(b"1199"); // address
@@ -321,7 +321,7 @@ mod test_public_interface {
     /// Test that parsing recovers if a command is interrupted
     /// and a new command is transmitted
     fn overlapping_commands() {
-        use super::slave::{parse_command, CommandToken};
+        use super::node::{parse_command, CommandToken};
 
         let mut read_cmd = vec![EOT];
         read_cmd.extend_from_slice(b"1199"); // address
@@ -397,7 +397,7 @@ mod test_public_interface {
 
     #[test]
     fn write_command() {
-        use super::slave::{parse_command, CommandToken};
+        use super::node::{parse_command, CommandToken};
 
         let mut buf = vec![EOT];
         buf.extend_from_slice(b"1199"); // address

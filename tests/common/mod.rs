@@ -88,9 +88,9 @@ type BusT = Arc<Mutex<VecDeque<u8>>>;
 #[derive(Default)]
 pub struct RS422Bus {
     masters: Mutex<Vec<Weak<BusInterfaceLink>>>,
-    slaves: Mutex<Vec<Weak<BusInterfaceLink>>>,
+    nodes: Mutex<Vec<Weak<BusInterfaceLink>>>,
     master_data_available: Arc<Condvar>,
-    slave_data_available: Arc<Condvar>,
+    node_data_available: Arc<Condvar>,
 }
 
 impl RS422Bus {
@@ -108,27 +108,27 @@ impl RS422Bus {
         BusInterface::new(Arc::clone(self), link)
     }
 
-    pub fn new_slave_interface(self: &Arc<RS422Bus>) -> BusInterface {
+    pub fn new_node_interface(self: &Arc<RS422Bus>) -> BusInterface {
         let link = Arc::new(BusInterfaceLink {
             is_master: false,
             rx: Default::default(),
-            rx_condvar: Arc::clone(&self.slave_data_available),
+            rx_condvar: Arc::clone(&self.node_data_available),
         });
-        self.slaves.lock().unwrap().push(Arc::downgrade(&link));
+        self.nodes.lock().unwrap().push(Arc::downgrade(&link));
         BusInterface::new(Arc::clone(&self), link)
     }
 
-    pub fn wake_blocked_slaves(&self) {
-        self.slave_data_available.notify_all()
+    pub fn wake_blocked_nodes(&self) {
+        self.node_data_available.notify_all()
     }
 
-    fn send_to_slaves(self: &Arc<Self>, data: u8) {
-        let slaves = self.slaves.lock().unwrap();
-        for weak in slaves.iter() {
-            if let Some(slave) = weak.upgrade() {
-                slave.rx.lock().unwrap().push_back(data);
+    fn send_to_nodes(self: &Arc<Self>, data: u8) {
+        let nodes = self.nodes.lock().unwrap();
+        for weak in nodes.iter() {
+            if let Some(node) = weak.upgrade() {
+                node.rx.lock().unwrap().push_back(data);
             }
-            self.slave_data_available.notify_all();
+            self.node_data_available.notify_all();
         }
     }
 
@@ -225,7 +225,7 @@ impl std::io::Write for BusInterface {
         } else {
             for byte in buf {
                 if self.link.is_master {
-                    self.bus.send_to_slaves(*byte);
+                    self.bus.send_to_nodes(*byte);
                 } else {
                     self.bus.send_to_masters(*byte)
                 }

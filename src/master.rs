@@ -17,20 +17,20 @@ pub enum Error {
 }
 
 #[derive(Copy, Clone)]
-struct SlaveState {
+struct NodeState {
     can_read_again: bool,
 }
 
 pub struct Master {
     read_again: Option<(Address, Parameter)>,
-    slaves: [SlaveState; 100],
+    nodes: [NodeState; 100],
 }
 
 impl Debug for Master {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Master {{ read_again: {:?}, slaves: [..]}}",
+            "Master {{ read_again: {:?}, nodes: [..]}}",
             self.read_again
         )
     }
@@ -46,7 +46,7 @@ impl Master {
     pub fn new() -> Master {
         Master {
             read_again: None,
-            slaves: [SlaveState {
+            nodes: [NodeState {
                 can_read_again: false,
             }; 100],
         }
@@ -91,7 +91,7 @@ impl Master {
     /// Consumes the self.read_again value
     fn try_read_again(&mut self, address: Address, parameter: Parameter) -> Option<u8> {
         let (old_addr, old_param) = self.read_again.take()?;
-        if old_addr == address && self.get_slave_capabilites(address).can_read_again {
+        if old_addr == address && self.get_node_capabilites(address).can_read_again {
             match *parameter - *old_param {
                 0 => Some(NAK),
                 1 => Some(ACK),
@@ -103,12 +103,12 @@ impl Master {
         }
     }
 
-    pub fn set_slave_capabilites(&mut self, address: Address, can_read_again: bool) {
-        self.slaves[address.as_usize()] = SlaveState { can_read_again };
+    pub fn set_node_capabilites(&mut self, address: Address, can_read_again: bool) {
+        self.nodes[address.as_usize()] = NodeState { can_read_again };
     }
 
-    fn get_slave_capabilites(&self, address: Address) -> SlaveState {
-        self.slaves[address.as_usize()]
+    fn get_node_capabilites(&self, address: Address) -> NodeState {
+        self.nodes[address.as_usize()]
     }
 }
 
@@ -147,7 +147,7 @@ pub enum ReceiveDataResult<R, T> {
 }
 
 /// Provides the receive_data() method for parsing response
-/// data from the slaves.
+/// data from the nodes.
 pub trait Receiver<'a>: Sized + private::Receiver {
     type Response;
 
@@ -341,10 +341,10 @@ pub mod io {
 
         pub fn set_can_read_again(&mut self, address: impl IntoAddress, value: bool) {
             self.proto
-                .set_slave_capabilites(address.into_address().unwrap(), value);
+                .set_node_capabilites(address.into_address().unwrap(), value);
         }
 
-        // Sends a write command to the slave. May use the shorter "write again" command form
+        /// Sends a write command to the node. May use the shorter "write again" command form
         pub fn write_parameter(
             &mut self,
             address: impl IntoAddress,
@@ -440,7 +440,7 @@ mod tests {
     fn read_again() -> Result<(), Error> {
         let (addr, param, _) = addr_param_val(10, 20, 56);
         let mut idle = Master::new();
-        idle.set_slave_capabilites(addr, true);
+        idle.set_node_capabilites(addr, true);
         idle.read_again = Some((addr, param));
         let send = idle.read_parameter(addr, param.checked_add(1)?);
         assert_eq!(send.as_slice(), [ACK]);

@@ -1,37 +1,37 @@
-//! See Slave for more details.
+//! See [BusNode] for more details.
 
 use snafu::Snafu;
 
 use crate::ascii::*;
 use crate::bcc;
 use crate::buffer::Buffer;
-use crate::nom_parser::slave::{parse_command, CommandToken};
+use crate::nom_parser::node::{parse_command, CommandToken};
 
 use crate::types::{self, Address, IntoAddress, Parameter, Value};
 
-/// Slave part of the X3.28 protocol
+/// Bus node (listener/server) part of the X3.28 protocol
 ///
-/// This enum represent the different states of the protocol.
+/// This enum represents the different states of the protocol.
 ///
-/// Create a new protocol instance with Slave::new(address).
+/// Create a new protocol instance with Node::new(address).
 ///
 /// # Example
 ///
 /// ```
-/// use x328_proto::Slave;
+/// use x328_proto::BusNode;
 /// # use std::io::{Read, Write, Cursor};
 /// # fn connect_serial_interface() -> Result<Cursor<Vec<u8>>,  &'static str>
 /// # { Ok(Cursor::new(Vec::new())) }
 /// #
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use x328_proto::Value;
-/// let mut slave_proto = Slave::new(10)?; // new protocol instance with address 10
+/// let mut node = BusNode::new(10)?; // new protocol instance with address 10
 /// let mut serial = connect_serial_interface()?;
 ///
 /// 'main: loop {
 ///        # break // this snippet is only for show
-///        slave_proto = match slave_proto {
-///            Slave::ReceiveData(recv) => {
+///        node = match node {
+///            BusNode::ReceiveData(recv) => {
 ///                let mut buf = [0; 1];
 ///                if let Ok(len) = serial.read(&mut buf) {
 ///                    if len == 0 {
@@ -43,12 +43,12 @@ use crate::types::{self, Address, IntoAddress, Parameter, Value};
 ///                }
 ///            }
 ///
-///            Slave::SendData(mut send) => {
+///            BusNode::SendData(mut send) => {
 ///                serial.write_all(send.send_data().as_ref()).unwrap();
 ///                send.data_sent()
 ///            }
 ///
-///            Slave::ReadParameter(read_command) => {
+///            BusNode::ReadParameter(read_command) => {
 ///                if read_command.parameter() == 3 {
 ///                    read_command.send_invalid_parameter()
 ///                } else {
@@ -56,7 +56,7 @@ use crate::types::{self, Address, IntoAddress, Parameter, Value};
 ///                }
 ///            }
 ///
-///            Slave::WriteParameter(write_command) => {
+///            BusNode::WriteParameter(write_command) => {
 ///                let param = write_command.parameter();
 ///                if param == 3 {
 ///                    write_command.write_error()
@@ -69,7 +69,7 @@ use crate::types::{self, Address, IntoAddress, Parameter, Value};
 /// # Ok(()) }
 ///  ```
 #[derive(Debug)]
-pub enum Slave {
+pub enum BusNode {
     /// More data needs to be received from the bus. Use receive_data() on the inner struct.
     ReceiveData(ReceiveData),
     /// Data is waiting to be transmitted.
@@ -80,27 +80,27 @@ pub enum Slave {
     WriteParameter(WriteParam),
 }
 
-impl Slave {
+impl BusNode {
     /// Create a new protocol instance, accepting commands for the given address.
     /// Returns an error if the given adress is invalid.
     /// # Example
     ///
     /// ```
-    /// use x328_proto::Slave;
-    /// let mut slave_proto: Slave = Slave::new(10).unwrap(); // new protocol instance with address 10
+    /// use x328_proto::BusNode;
+    /// let mut node: BusNode = BusNode::new(10).unwrap(); // new protocol instance with address 10
     /// ```
-    pub fn new(address: impl IntoAddress) -> Result<Slave, Error> {
+    pub fn new(address: impl IntoAddress) -> Result<BusNode, Error> {
         Ok(ReceiveData::create(address.into_address()?))
     }
 
     /// Do not send any reply to the master. Transition to the idle ReceiveData state instead.
     /// You really shouldn't do this, since this will leave the master waiting until it times out.
-    pub fn no_reply(self) -> Slave {
+    pub fn no_reply(self) -> BusNode {
         let state = match self {
-            Slave::ReceiveData(ReceiveData { state, .. }) => state,
-            Slave::SendData(SendData { state, .. }) => state,
-            Slave::ReadParameter(ReadParam { state, .. }) => state,
-            Slave::WriteParameter(WriteParam { state, .. }) => state,
+            BusNode::ReceiveData(ReceiveData { state, .. }) => state,
+            BusNode::SendData(SendData { state, .. }) => state,
+            BusNode::ReadParameter(ReadParam { state, .. }) => state,
+            BusNode::WriteParameter(WriteParam { state, .. }) => state,
         };
         ReceiveData::from_state(state)
     }
@@ -113,26 +113,26 @@ pub enum Error {
     InvalidArgument { source: types::Error },
 }
 
-type SlaveState = Box<SlaveStateStruct>;
+type NodeState = Box<NodeStateStruct>;
 
 #[derive(Debug)]
-struct SlaveStateStruct {
+struct NodeStateStruct {
     address: Address,
     read_again_param: Option<(Address, Parameter)>,
 }
 
-impl SlaveStateStruct {}
+impl NodeStateStruct {}
 
 #[derive(Debug)]
 pub struct ReceiveData {
-    state: SlaveState,
+    state: NodeState,
     input_buffer: Buffer,
 }
 
 impl ReceiveData {
-    fn create(address: Address) -> Slave {
-        Slave::ReceiveData(ReceiveData {
-            state: Box::new(SlaveStateStruct {
+    fn create(address: Address) -> BusNode {
+        BusNode::ReceiveData(ReceiveData {
+            state: Box::new(NodeStateStruct {
                 address,
                 read_again_param: None,
             }),
@@ -140,8 +140,8 @@ impl ReceiveData {
         })
     }
 
-    fn from_state(state: SlaveState) -> Slave {
-        Slave::ReceiveData(ReceiveData {
+    fn from_state(state: NodeState) -> BusNode {
+        BusNode::ReceiveData(ReceiveData {
             state,
             input_buffer: Buffer::new(),
         })
@@ -151,13 +151,13 @@ impl ReceiveData {
     ///
     /// A state transition will occur if a complete command has been received,
     /// or if a protocol error requires a response to be sent.
-    pub fn receive_data(mut self, data: &[u8]) -> Slave {
+    pub fn receive_data(mut self, data: &[u8]) -> BusNode {
         self.input_buffer.write(data);
 
         self.parse_buffer()
     }
 
-    fn parse_buffer(mut self) -> Slave {
+    fn parse_buffer(mut self) -> BusNode {
         use CommandToken::*;
 
         let (token, read_again_param) = loop {
@@ -196,11 +196,11 @@ impl ReceiveData {
         }
     }
 
-    fn need_data(self) -> Slave {
-        Slave::ReceiveData(self)
+    fn need_data(self) -> BusNode {
+        BusNode::ReceiveData(self)
     }
 
-    fn send_nak(self) -> Slave {
+    fn send_nak(self) -> BusNode {
         SendData::from_state(self.state, vec![NAK])
     }
 
@@ -211,17 +211,17 @@ impl ReceiveData {
 
 #[derive(Debug)]
 pub struct SendData {
-    state: SlaveState,
+    state: NodeState,
     data: Vec<u8>,
 }
 
 impl SendData {
-    fn from_state(state: SlaveState, data: Vec<u8>) -> Slave {
-        Slave::SendData(SendData { state, data })
+    fn from_state(state: NodeState, data: Vec<u8>) -> BusNode {
+        BusNode::SendData(SendData { state, data })
     }
 
-    fn nak_from_state(state: SlaveState) -> Slave {
-        Slave::SendData(SendData {
+    fn nak_from_state(state: NodeState) -> BusNode {
+        BusNode::SendData(SendData {
             state,
             data: vec![NAK],
         })
@@ -235,21 +235,21 @@ impl SendData {
 
     /// Signals that the data was sent, and it's time to go back to the
     /// ReadData state.
-    pub fn data_sent(self) -> Slave {
+    pub fn data_sent(self) -> BusNode {
         ReceiveData::from_state(self.state)
     }
 }
 
 #[derive(Debug)]
 pub struct ReadParam {
-    state: SlaveState,
+    state: NodeState,
     address: Address,
     parameter: Parameter,
 }
 
 impl ReadParam {
-    fn from_state(state: SlaveState, address: Address, parameter: Parameter) -> Slave {
-        Slave::ReadParameter(ReadParam {
+    fn from_state(state: NodeState, address: Address, parameter: Parameter) -> BusNode {
+        BusNode::ReadParameter(ReadParam {
             state,
             address,
             parameter,
@@ -258,7 +258,7 @@ impl ReadParam {
 
     /// Send a response to the master with the value of
     /// the parameter in the read request.
-    pub fn send_reply_ok(mut self, value: Value) -> Slave {
+    pub fn send_reply_ok(mut self, value: Value) -> BusNode {
         self.state.read_again_param = Some((self.address, self.parameter));
 
         let mut data = Vec::with_capacity(15);
@@ -272,19 +272,19 @@ impl ReadParam {
     }
 
     /// Inform the master that the parameter in the request is invalid.
-    pub fn send_invalid_parameter(self) -> Slave {
+    pub fn send_invalid_parameter(self) -> BusNode {
         SendData::from_state(self.state, vec![EOT])
     }
 
     /// Inform the bus master that the read request failed
     /// for some reason other than invalid parameter number.
-    pub fn send_read_failed(self) -> Slave {
+    pub fn send_read_failed(self) -> BusNode {
         SendData::from_state(self.state, vec![NAK])
     }
 
     /// Do not send any reply to the master. Transition to the idle ReceiveData state instead.
     /// You really shouldn't do this, since this will leave the master waiting until it times out.
-    pub fn no_reply(self) -> Slave {
+    pub fn no_reply(self) -> BusNode {
         ReceiveData::from_state(self.state)
     }
 
@@ -301,7 +301,7 @@ impl ReadParam {
 
 #[derive(Debug)]
 pub struct WriteParam {
-    state: SlaveState,
+    state: NodeState,
     address: Address,
     parameter: Parameter,
     value: Value,
@@ -309,12 +309,12 @@ pub struct WriteParam {
 
 impl WriteParam {
     fn from_state(
-        state: SlaveState,
+        state: NodeState,
         address: Address,
         parameter: Parameter,
         value: Value,
-    ) -> Slave {
-        Slave::WriteParameter(WriteParam {
+    ) -> BusNode {
+        BusNode::WriteParameter(WriteParam {
             state,
             address,
             parameter,
@@ -323,19 +323,19 @@ impl WriteParam {
     }
 
     /// Inform the master that the parameter value was successfully updated.
-    pub fn write_ok(self) -> Slave {
+    pub fn write_ok(self) -> BusNode {
         SendData::from_state(self.state, vec![ACK])
     }
 
     /// The parameter or value is invalid, or something else is preventing
     /// us from setting the parameter to the given value.
-    pub fn write_error(self) -> Slave {
+    pub fn write_error(self) -> BusNode {
         SendData::nak_from_state(self.state)
     }
 
     /// Do not send any reply to the master. Transition to the idle ReceiveData state instead.
     /// You really shouldn't do this, since this will leave the master waiting until it times out.
-    pub fn no_reply(self) -> Slave {
+    pub fn no_reply(self) -> BusNode {
         ReceiveData::from_state(self.state)
     }
 
