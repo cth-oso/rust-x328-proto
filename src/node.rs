@@ -1,13 +1,12 @@
 //! See [BusNode] for more details.
 
 use arrayvec::ArrayVec;
-use snafu::Snafu;
 
 use crate::ascii::*;
 use crate::bcc;
 use crate::buffer::Buffer;
 use crate::nom_parser::node::{parse_command, CommandToken};
-use crate::types::{self, Address, IntoAddress, Parameter, Value};
+use crate::types::{Address, Error as TypeError, IntoAddress, Parameter, Value};
 
 /// Bus node (listener/server) part of the X3.28 protocol
 ///
@@ -89,7 +88,7 @@ impl BusNode {
     /// use x328_proto::BusNode;
     /// let mut node: BusNode = BusNode::new(10).unwrap(); // new protocol instance with address 10
     /// ```
-    pub fn new(address: impl IntoAddress) -> Result<BusNode, Error> {
+    pub fn new(address: impl IntoAddress) -> Result<BusNode, TypeError> {
         Ok(ReceiveData::create(address.into_address()?))
     }
 
@@ -106,13 +105,6 @@ impl BusNode {
     }
 }
 
-#[derive(Debug, Snafu)]
-#[non_exhaustive]
-pub enum Error {
-    #[snafu(display("Invalid argument {}", source), context(false))]
-    InvalidArgument { source: types::Error },
-}
-
 type NodeState = Box<NodeStateStruct>;
 
 #[derive(Debug)]
@@ -123,6 +115,7 @@ struct NodeStateStruct {
 
 impl NodeStateStruct {}
 
+/// Struct with methods for the "receive data from bus" state.
 #[derive(Debug)]
 pub struct ReceiveData {
     state: NodeState,
@@ -212,6 +205,10 @@ impl ReceiveData {
 // length: STX<param (4)><value (6)>ETX<bcc> == 13
 type SendDataStore = ArrayVec<u8, 13>;
 
+/// Struct with methods for the "transmit data on bus" state.
+///
+/// Call [`send_data()`](Self::send_data()) to get a reference to the data to be transmitted,
+/// and then call [`data_sent()`](Self::data_sent()) when the data has been successfully transmitted.
 #[derive(Debug)]
 pub struct SendData {
     state: NodeState,
@@ -241,6 +238,7 @@ impl SendData {
     }
 }
 
+/// Struct representing the "read command received" state.
 #[derive(Debug)]
 pub struct ReadParam {
     state: NodeState,
@@ -301,6 +299,7 @@ impl ReadParam {
     }
 }
 
+/// Struct representing the "write command received" state.
 #[derive(Debug)]
 pub struct WriteParam {
     state: NodeState,

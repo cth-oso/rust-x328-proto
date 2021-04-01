@@ -26,7 +26,7 @@ pub(crate) mod master {
         InvalidDataReceived,
     }
 
-    pub(crate) fn parse_write_reponse(buf: &Buf) -> ResponseToken {
+    pub(crate) fn parse_write_response(buf: &Buf) -> ResponseToken {
         parse_response(all_consuming(alt((
             value(ResponseToken::WriteOk, ascii_char(ACK)),
             value(ResponseToken::WriteFailed, ascii_char(NAK)),
@@ -442,10 +442,10 @@ mod test_public_interface {
 
     #[test]
     fn write_response() {
-        use super::master::{parse_write_reponse, ResponseToken};
+        use super::master::{parse_write_response, ResponseToken};
 
         for b in 0u8..=255 {
-            match parse_write_reponse(&[b]) {
+            match parse_write_response(&[b]) {
                 ResponseToken::WriteOk if b == ACK => {}
                 ResponseToken::WriteFailed if b == NAK => {}
                 ResponseToken::InvalidParameter if b == EOT => {}
@@ -455,7 +455,7 @@ mod test_public_interface {
         }
 
         assert_eq!(
-            parse_write_reponse(&[ACK, ACK]),
+            parse_write_response(&[ACK, ACK]),
             ResponseToken::InvalidDataReceived
         );
     }

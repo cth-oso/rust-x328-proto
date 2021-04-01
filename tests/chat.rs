@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use x328_proto::master;
 use x328_proto::master::io::Master;
-use x328_proto::node::{self, BusNode};
+use x328_proto::BusNode;
 
 use common::{BusInterface, RS422Bus};
 
@@ -38,8 +38,8 @@ fn master_main_loop(io: BusInterface) -> Result<(), master::io::Error> {
     Ok(())
 }
 
-fn node_main_loop(mut serial: BusInterface) -> Result<(), node::Error> {
-    let mut node = BusNode::new(5)?;
+fn node_main_loop(mut serial: BusInterface) {
+    let mut node = BusNode::new(5).unwrap();
     'main: loop {
         if SHUTDOWN.load(SeqCst) {
             break 'main;
@@ -82,7 +82,6 @@ fn node_main_loop(mut serial: BusInterface) -> Result<(), node::Error> {
         };
     }
     println!("Node terminating");
-    Ok(())
 }
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
@@ -109,8 +108,6 @@ fn chat1() {
     SHUTDOWN.store(true, SeqCst);
     bus.wake_blocked_nodes();
 
-    node.join()
-        .expect("Node paniced")
-        .expect("Node returned an error");
+    node.join().expect("Node panicked");
     println!("Node joined")
 }

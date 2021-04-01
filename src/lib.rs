@@ -1,6 +1,6 @@
 //! Sans-IO implementation of the ANSI X3.28 serial line protocol
 //!
-//! X3.28 is an old fieldbus protocol, commonly used on top of a RS-422 bus.
+//! X3.28 is an old field bus protocol, commonly used on top of a RS-422 bus.
 //! The bus settings should be 9600 baud, 7 bit char, no flow control, even parity, 1 stop bit (7E1).
 //! Since this crate doesn't provide IO at all, feel free to use whatever transport you want.
 
@@ -9,7 +9,9 @@ pub mod node;
 
 pub use master::Master;
 pub use node::BusNode;
-pub use types::{Address, IntoAddress, IntoParameter, IntoValue, Parameter, Value};
+pub use types::{
+    Address, Error as TypeError, IntoAddress, IntoParameter, IntoValue, Parameter, Value,
+};
 
 mod buffer;
 mod nom_parser;

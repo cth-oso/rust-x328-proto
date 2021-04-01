@@ -1,26 +1,20 @@
+//! The bus controller half of the X3.28 protocol
 use arrayvec::ArrayVec;
-use snafu::Snafu;
 
 use std::fmt::{Debug, Formatter};
 
 use crate::ascii::*;
 use crate::bcc;
 use crate::buffer::Buffer;
-use crate::nom_parser::master::{parse_read_response, parse_write_reponse, ResponseToken};
-use crate::types::{self, Address, Parameter, Value};
-
-#[derive(Debug, Snafu)]
-#[non_exhaustive]
-pub enum Error {
-    #[snafu(display("Invalid argument {}", source), context(false))]
-    InvalidArgument { source: types::Error },
-}
+use crate::nom_parser::master::{parse_read_response, parse_write_response, ResponseToken};
+use crate::types::{Address, Parameter, Value};
 
 #[derive(Copy, Clone)]
 struct NodeState {
     can_read_again: bool,
 }
 
+/// X3.28 bus controller.
 pub struct Master {
     read_again: Option<(Address, Parameter)>,
     nodes: [NodeState; 100],
@@ -52,6 +46,10 @@ impl Master {
         }
     }
 
+    /// Initiate a write command to a node.
+    ///
+    /// The returned struct holds the data that needs to be transmitted
+    /// on the bus.
     pub fn write_parameter(
         &mut self,
         address: Address,
@@ -70,6 +68,10 @@ impl Master {
         SendData::new(data, ReceiveWriteResponse::new(self))
     }
 
+    /// Initiate a read command to a node.
+    ///
+    /// The returned [SendData] struct holds the data that needs to be transmitted
+    /// on the bus.
     pub fn read_parameter(
         &mut self,
         address: Address,
@@ -91,7 +93,7 @@ impl Master {
     /// Consumes the self.read_again value
     fn try_read_again(&mut self, address: Address, parameter: Parameter) -> Option<u8> {
         let (old_addr, old_param) = self.read_again.take()?;
-        if old_addr == address && self.get_node_capabilites(address).can_read_again {
+        if old_addr == address && self.get_node_capabilities(address).can_read_again {
             match *parameter - *old_param {
                 0 => Some(NAK),
                 1 => Some(ACK),
@@ -103,17 +105,23 @@ impl Master {
         }
     }
 
-    pub fn set_node_capabilites(&mut self, address: Address, can_read_again: bool) {
+    pub fn set_node_capabilities(&mut self, address: Address, can_read_again: bool) {
         self.nodes[address.as_usize()] = NodeState { can_read_again };
     }
 
-    fn get_node_capabilites(&self, address: Address) -> NodeState {
+    fn get_node_capabilities(&self, address: Address) -> NodeState {
         self.nodes[address.as_usize()]
     }
 }
 
 type SendDataStore = ArrayVec<u8, 20>;
 
+/// [SendData] holds data that should be transmitted to the nodes.
+///
+/// Call [data_sent()](Self::data_sent()) after the data has been
+/// successfully transmitted in order to transition to the "response
+/// receive" state. If data transmission fails this struct should be
+/// dropped in order to return to the idle state.
 #[derive(Debug)]
 pub struct SendData<R> {
     data: SendDataStore,
@@ -125,10 +133,13 @@ impl<'a, R: Receiver<'a>> SendData<R> {
         SendData { data, receiver }
     }
 
-    pub fn as_slice(&self) -> &[u8] {
+    /// Returns a reference to the data to be transmitted.
+    pub fn get_data(&self) -> &[u8] {
         self.data.as_slice()
     }
 
+    /// Call after data has been successfully transmitted in order
+    /// to transition to the "receive response" state.
     pub fn data_sent(self) -> R {
         self.receiver
     }
@@ -138,7 +149,7 @@ mod private {
     pub trait Receiver {}
 }
 
-/// Return value from Receiver::recieve_data()
+/// Return value from Receiver::receive_data()
 /// Indicates if enough data has been received or if more data is needed.
 /// R is the receiver (Self), T is Self::Response
 pub enum ReceiveDataResult<R, T> {
@@ -151,10 +162,10 @@ pub enum ReceiveDataResult<R, T> {
 pub trait Receiver<'a>: Sized + private::Receiver {
     type Response;
 
-    /// Receive and parse data from the bus. Passing a zero length
-    /// slice will result in a TransmissionError response.
+    /// Receive and parse data from the bus.
     ///
-    /// No more data should be read when Some(response) is returned.
+    /// Note that the method consumes self, so it must be reclaimed
+    /// from the return value.
     fn receive_data(self, data: &[u8]) -> ReceiveDataResult<Self, Self::Response>;
 }
 
@@ -165,6 +176,8 @@ pub enum WriteResult {
     ProtocolError,
 }
 
+/// Call [receive_data()](Receiver::receive_data()) to process the
+/// received response data from the node.
 #[derive(Debug)]
 pub struct ReceiveWriteResponse<'a> {
     master: &'a mut Master,
@@ -189,7 +202,7 @@ impl<'b> Receiver<'b> for ReceiveWriteResponse<'b> {
         use ResponseToken::*;
         self.buffer.write(data);
 
-        ReceiveDataResult::Done(match parse_write_reponse(self.buffer.as_ref()) {
+        ReceiveDataResult::Done(match parse_write_response(self.buffer.as_ref()) {
             WriteOk => WriteResult::WriteOk,
             WriteFailed | InvalidParameter => WriteResult::WriteFailed,
             _ => WriteResult::ProtocolError,
@@ -309,7 +322,7 @@ pub mod io {
     {
         fn write_to(self, writer: &mut impl Write) -> Result<R, Error> {
             match writer
-                .write_all(self.as_slice())
+                .write_all(self.get_data())
                 .and_then(|_| writer.flush())
             {
                 Ok(_) => Ok(self.data_sent()),
@@ -341,7 +354,7 @@ pub mod io {
 
         pub fn set_can_read_again(&mut self, address: impl IntoAddress, value: bool) {
             self.proto
-                .set_node_capabilites(address.into_address().unwrap(), value);
+                .set_node_capabilities(address.into_address().unwrap(), value);
         }
 
         /// Sends a write command to the node. May use the shorter "write again" command form
@@ -417,33 +430,30 @@ mod tests {
     }
 
     #[test]
-    fn write_parameter() -> Result<(), Error> {
+    fn write_parameter() {
         let (addr, param, val) = addr_param_val(43, 1234, 56);
         let mut master = Master::new();
         let x = master.write_parameter(addr, param, val);
         // println!("{}", String::from_utf8(x.as_slice().to_vec()).unwrap());
-        assert_eq!(x.as_slice(), b"\x044433\x021234+56\x03\x2F");
-        Ok(())
+        assert_eq!(x.get_data(), b"\x044433\x021234+56\x03\x2F");
     }
 
     #[test]
-    fn read_parameter() -> Result<(), Error> {
+    fn read_parameter() {
         let (addr, param, _) = addr_param_val(43, 1234, 56);
         let mut master = Master::new();
         let x = master.read_parameter(addr, param);
         // println!("{}", String::from_utf8(x.as_slice().to_vec()).unwrap());
-        assert_eq!(x.as_slice(), b"\x0444331234\x05");
-        Ok(())
+        assert_eq!(x.get_data(), b"\x0444331234\x05");
     }
 
     #[test]
-    fn read_again() -> Result<(), Error> {
+    fn read_again() {
         let (addr, param, _) = addr_param_val(10, 20, 56);
         let mut idle = Master::new();
-        idle.set_node_capabilites(addr, true);
+        idle.set_node_capabilities(addr, true);
         idle.read_again = Some((addr, param));
-        let send = idle.read_parameter(addr, param.checked_add(1)?);
-        assert_eq!(send.as_slice(), [ACK]);
-        Ok(())
+        let send = idle.read_parameter(addr, param.checked_add(1).unwrap());
+        assert_eq!(send.get_data(), [ACK]);
     }
 }

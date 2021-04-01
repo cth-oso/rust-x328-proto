@@ -3,7 +3,7 @@ mod common;
 use common::{SerialIOPlane, SerialInterface};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use x328_proto::{node::BusNode, Parameter, Value};
+use x328_proto::{BusNode, Parameter, Value};
 
 #[test]
 fn node_main_loop() {
