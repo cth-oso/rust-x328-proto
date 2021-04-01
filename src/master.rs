@@ -263,11 +263,11 @@ pub mod io {
         #[snafu(display("X3.28 invalid parameter"))]
         InvalidParameter { backtrace: Backtrace },
         #[snafu(display("X3.28 write received NAK response"))]
-        WriteNAK { backtrace: Backtrace },
+        WriteFailed { backtrace: Backtrace },
         #[snafu(display("X3.28 error: bad transmission."))]
         BusDataError { backtrace: Backtrace },
         #[snafu(display("X3.28 IO error: {}", source))]
-        IOError {
+        IoError {
             source: std::io::Error,
             backtrace: Backtrace,
         },
@@ -289,7 +289,7 @@ pub mod io {
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                     x => x,
                 }
-                .context(IOError {})?;
+                .context(IoError {})?;
 
                 match self.receive_data(&data[..len]) {
                     ReceiveDataResult::Done(response) => return Ok(response),
@@ -315,7 +315,7 @@ pub mod io {
                 Ok(_) => Ok(self.data_sent()),
                 Err(err) => Err(err),
             }
-            .context(IOError {})
+            .context(IoError {})
         }
     }
 
@@ -362,7 +362,7 @@ pub mod io {
                 .receive_from(&mut self.stream)?;
             match response {
                 WriteResult::WriteOk => Ok(()),
-                WriteResult::WriteFailed => WriteNAK {}.fail(),
+                WriteResult::WriteFailed => WriteFailed {}.fail(),
                 WriteResult::ProtocolError => BusDataError {}.fail(),
             }
         }
