@@ -267,7 +267,7 @@ pub enum ValueFormat {
 #[derive(Debug, Copy, Clone)]
 pub struct Value(i32, ValueFormat);
 
-pub(crate) type ValueBytes = ArrayVec<[u8; 6]>;
+pub(crate) type ValueBytes = ArrayVec<u8, 6>;
 
 impl Value {
     /// Try to create a Value from the given i32 integer. Returns None if the

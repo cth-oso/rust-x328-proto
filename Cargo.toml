@@ -7,6 +7,6 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-arrayvec = "0.5"
+arrayvec = { version = "0.7", default-features=false }
 nom = { version = "6.1", default-features=false }
 snafu = { version="0.6", default-features=false, features=["std"] }

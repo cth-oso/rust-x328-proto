@@ -112,7 +112,7 @@ impl Master {
     }
 }
 
-type SendDataStore = ArrayVec<[u8; 20]>;
+type SendDataStore = ArrayVec<u8, 20>;
 
 #[derive(Debug)]
 pub struct SendData<R> {
