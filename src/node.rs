@@ -1,12 +1,12 @@
 //! See [BusNode] for more details.
 
+use arrayvec::ArrayVec;
 use snafu::Snafu;
 
 use crate::ascii::*;
 use crate::bcc;
 use crate::buffer::Buffer;
 use crate::nom_parser::node::{parse_command, CommandToken};
-
 use crate::types::{self, Address, IntoAddress, Parameter, Value};
 
 /// Bus node (listener/server) part of the X3.28 protocol
@@ -188,7 +188,7 @@ impl ReceiveData {
                 if let Ok(next_param) = read_again_param.unwrap().1.checked_add(offset) {
                     ReadParam::from_state(self.state, read_again_param.unwrap().0, next_param)
                 } else {
-                    SendData::from_state(self.state, vec![EOT])
+                    SendData::from_byte(self.state, EOT)
                 }
             }
             InvalidPayload(address) if address == self.state.address => self.send_nak(),
@@ -201,7 +201,7 @@ impl ReceiveData {
     }
 
     fn send_nak(self) -> BusNode {
-        SendData::from_state(self.state, vec![NAK])
+        SendData::from_byte(self.state, NAK)
     }
 
     fn for_us(&self, address: Address) -> bool {
@@ -209,28 +209,29 @@ impl ReceiveData {
     }
 }
 
+// length: STX<param (4)><value (6)>ETX<bcc> == 13
+type SendDataStore = ArrayVec<u8, 13>;
+
 #[derive(Debug)]
 pub struct SendData {
     state: NodeState,
-    data: Vec<u8>,
+    data: SendDataStore,
 }
 
 impl SendData {
-    fn from_state(state: NodeState, data: Vec<u8>) -> BusNode {
+    fn from_state(state: NodeState, data: SendDataStore) -> BusNode {
         BusNode::SendData(SendData { state, data })
     }
 
-    fn nak_from_state(state: NodeState) -> BusNode {
-        BusNode::SendData(SendData {
-            state,
-            data: vec![NAK],
-        })
+    fn from_byte(state: NodeState, byte: u8) -> BusNode {
+        let mut data = ArrayVec::new();
+        data.push(byte);
+        BusNode::SendData(SendData { state, data })
     }
 
-    /// Returns the data to be sent on the bus. Subsequent calls will return
-    /// an empty Vec<u8>.
-    pub fn send_data(&mut self) -> Vec<u8> {
-        self.data.split_off(0)
+    /// Returns the data to be sent on the bus.
+    pub fn send_data(&mut self) -> &[u8] {
+        self.data.as_ref()
     }
 
     /// Signals that the data was sent, and it's time to go back to the
@@ -261,10 +262,11 @@ impl ReadParam {
     pub fn send_reply_ok(mut self, value: Value) -> BusNode {
         self.state.read_again_param = Some((self.address, self.parameter));
 
-        let mut data = Vec::with_capacity(15);
+        let mut data = SendDataStore::new();
         data.push(STX);
-        data.extend_from_slice(&self.parameter.to_bytes());
-        data.extend_from_slice(&value.to_bytes());
+        data.try_extend_from_slice(&self.parameter.to_bytes())
+            .unwrap();
+        data.try_extend_from_slice(&value.to_bytes()).unwrap();
         data.push(ETX);
         data.push(bcc(&data[1..]));
 
@@ -273,13 +275,13 @@ impl ReadParam {
 
     /// Inform the master that the parameter in the request is invalid.
     pub fn send_invalid_parameter(self) -> BusNode {
-        SendData::from_state(self.state, vec![EOT])
+        SendData::from_byte(self.state, EOT)
     }
 
     /// Inform the bus master that the read request failed
     /// for some reason other than invalid parameter number.
     pub fn send_read_failed(self) -> BusNode {
-        SendData::from_state(self.state, vec![NAK])
+        SendData::from_byte(self.state, NAK)
     }
 
     /// Do not send any reply to the master. Transition to the idle ReceiveData state instead.
@@ -324,13 +326,13 @@ impl WriteParam {
 
     /// Inform the master that the parameter value was successfully updated.
     pub fn write_ok(self) -> BusNode {
-        SendData::from_state(self.state, vec![ACK])
+        SendData::from_byte(self.state, ACK)
     }
 
     /// The parameter or value is invalid, or something else is preventing
     /// us from setting the parameter to the given value.
     pub fn write_error(self) -> BusNode {
-        SendData::nak_from_state(self.state)
+        SendData::from_byte(self.state, NAK)
     }
 
     /// Do not send any reply to the master. Transition to the idle ReceiveData state instead.
