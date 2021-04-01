@@ -8,6 +8,7 @@ use crate::bcc;
 use crate::buffer::Buffer;
 use crate::nom_parser::master::{parse_read_response, parse_write_response, ResponseToken};
 use crate::types::{Address, Parameter, Value};
+use std::marker::PhantomData;
 
 #[derive(Copy, Clone)]
 struct NodeState {
@@ -55,7 +56,7 @@ impl Master {
         address: Address,
         parameter: Parameter,
         value: Value,
-    ) -> SendData<ReceiveWriteResponse<'_>> {
+    ) -> SendData<ReceiveWriteResponse, WriteResult> {
         self.read_again = None;
         let mut data = SendDataStore::new();
         data.push(EOT);
@@ -76,7 +77,7 @@ impl Master {
         &mut self,
         address: Address,
         parameter: Parameter,
-    ) -> SendData<ReceiveReadResponse> {
+    ) -> SendData<ReceiveReadResponse, ReadResult> {
         let mut data = SendDataStore::new();
         if let Some(again) = self.try_read_again(address, parameter) {
             data.push(again);
@@ -123,14 +124,19 @@ type SendDataStore = ArrayVec<u8, 20>;
 /// receive" state. If data transmission fails this struct should be
 /// dropped in order to return to the idle state.
 #[derive(Debug)]
-pub struct SendData<R> {
+pub struct SendData<'a, Rec: Receiver<Res>, Res> {
     data: SendDataStore,
-    receiver: R,
+    receiver: Rec,
+    _phantom: PhantomData<&'a Res>,
 }
 
-impl<'a, R: Receiver<'a>> SendData<R> {
-    fn new(data: SendDataStore, receiver: R) -> Self {
-        SendData { data, receiver }
+impl<'a, Rec: Receiver<Res>, Res> SendData<'a, Rec, Res> {
+    fn new(data: SendDataStore, receiver: Rec) -> Self {
+        SendData {
+            data,
+            receiver,
+            _phantom: PhantomData::default(),
+        }
     }
 
     /// Returns a reference to the data to be transmitted.
@@ -140,7 +146,7 @@ impl<'a, R: Receiver<'a>> SendData<R> {
 
     /// Call after data has been successfully transmitted in order
     /// to transition to the "receive response" state.
-    pub fn data_sent(self) -> R {
+    pub fn data_sent(self) -> Rec {
         self.receiver
     }
 }
@@ -159,14 +165,12 @@ pub enum ReceiveDataResult<R, T> {
 
 /// Provides the receive_data() method for parsing response
 /// data from the nodes.
-pub trait Receiver<'a>: Sized + private::Receiver {
-    type Response;
-
+pub trait Receiver<Response>: Sized + private::Receiver {
     /// Receive and parse data from the bus.
     ///
     /// Note that the method consumes self, so it must be reclaimed
     /// from the return value.
-    fn receive_data(self, data: &[u8]) -> ReceiveDataResult<Self, Self::Response>;
+    fn receive_data(self, data: &[u8]) -> ReceiveDataResult<Self, Response>;
 }
 
 #[derive(Debug, PartialEq)]
@@ -195,10 +199,8 @@ impl<'a> ReceiveWriteResponse<'a> {
 
 impl private::Receiver for ReceiveWriteResponse<'_> {}
 
-impl<'b> Receiver<'b> for ReceiveWriteResponse<'b> {
-    type Response = WriteResult;
-
-    fn receive_data(mut self, data: &[u8]) -> ReceiveDataResult<Self, Self::Response> {
+impl Receiver<WriteResult> for ReceiveWriteResponse<'_> {
+    fn receive_data(mut self, data: &[u8]) -> ReceiveDataResult<Self, WriteResult> {
         use ResponseToken::*;
         self.buffer.write(data);
 
@@ -242,10 +244,8 @@ impl<'a> ReceiveReadResponse<'a> {
 
 impl private::Receiver for ReceiveReadResponse<'_> {}
 
-impl<'a> Receiver<'a> for ReceiveReadResponse<'a> {
-    type Response = ReadResult;
-
-    fn receive_data(mut self, data: &[u8]) -> ReceiveDataResult<Self, Self::Response> {
+impl Receiver<ReadResult> for ReceiveReadResponse<'_> {
+    fn receive_data(mut self, data: &[u8]) -> ReceiveDataResult<Self, ReadResult> {
         use ResponseToken::*;
         self.buffer.write(data);
 
@@ -286,12 +286,12 @@ pub mod io {
         },
     }
 
-    trait ReceiveFrom<'a>: Receiver<'a> {
-        fn receive_from(self, reader: &mut impl Read) -> Result<Self::Response, Error>;
+    trait ReceiveFrom<Res>: Receiver<Res> {
+        fn receive_from(self, reader: &mut impl Read) -> Result<Res, Error>;
     }
 
-    impl<'a, R: Receiver<'a>> ReceiveFrom<'a> for R {
-        fn receive_from(mut self, reader: &mut impl Read) -> Result<Self::Response, Error> {
+    impl<R: Receiver<Res>, Res> ReceiveFrom<Res> for R {
+        fn receive_from(mut self, reader: &mut impl Read) -> Result<Res, Error> {
             let mut data = [0];
             loop {
                 let len = match reader.read(&mut data) {
@@ -316,11 +316,11 @@ pub mod io {
         fn write_to(self, writer: &mut impl std::io::Write) -> Result<R, Error>;
     }
 
-    impl<'a, R> WriteData<R> for SendData<R>
+    impl<Rec, Res> WriteData<Rec> for SendData<'_, Rec, Res>
     where
-        R: Receiver<'a>,
+        Rec: Receiver<Res>,
     {
-        fn write_to(self, writer: &mut impl Write) -> Result<R, Error> {
+        fn write_to(self, writer: &mut impl Write) -> Result<Rec, Error> {
             match writer
                 .write_all(self.get_data())
                 .and_then(|_| writer.flush())
