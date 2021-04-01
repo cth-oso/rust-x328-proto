@@ -1,32 +1,38 @@
+use arrayvec::ArrayVec;
+
 #[derive(Debug)]
-pub struct Buffer {
-    data: Vec<u8>,
+pub(crate) struct Buffer {
+    data: ArrayVec<u8, 40>, // The maximum X3.28 message length is 18 bytes
     read_pos: usize,
 }
 
 impl Buffer {
-    pub fn new() -> Buffer {
+    pub(crate) fn new() -> Buffer {
         Buffer {
-            data: Vec::with_capacity(100),
+            data: ArrayVec::new(),
             read_pos: 0,
         }
     }
 
-    pub fn len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.data.len() - self.read_pos
     }
 
-    pub fn consume(&mut self, len: usize) {
+    pub(crate) fn consume(&mut self, len: usize) {
         assert!(len <= self.len());
         self.read_pos += len;
     }
 
-    pub fn write(&mut self, bytes: &[u8]) {
+    pub(crate) fn write(&mut self, bytes: &[u8]) {
         if self.read_pos == self.data.len() {
             self.clear();
         }
+        let cap = self.data.remaining_capacity();
+        if cap < bytes.len() {
+            self.data.drain(..(bytes.len() - cap));
+        }
         let write_pos = self.data.len();
-        self.data.extend_from_slice(bytes);
+        self.data.try_extend_from_slice(bytes).unwrap();
         for byte in self.data[write_pos..].iter_mut() {
             if *byte > 0x7f {
                 *byte = 0; // map all non-ASCII bytes to NUL
@@ -34,7 +40,7 @@ impl Buffer {
         }
     }
 
-    pub fn clear(&mut self) {
+    pub(crate) fn clear(&mut self) {
         self.data.clear();
         self.read_pos = 0;
     }
