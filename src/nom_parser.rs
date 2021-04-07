@@ -8,6 +8,7 @@ use nom::IResult;
 
 use crate::ascii::*;
 use crate::types::{Address, Parameter, ParameterOffset, Value};
+use std::convert::TryInto;
 
 type Char = u8;
 type Buf = [u8];
@@ -212,9 +213,10 @@ fn parameter(buf: &Buf) -> IResult<&Buf, Parameter> {
 
 fn x328_value(buf: &Buf) -> IResult<&Buf, Value> {
     terminated(
-        map_int(take_while_m_n(1, 6, |c: Char| {
-            c.is_ascii_digit() || c == b'+' || c == b'-'
-        })),
+        map_res(
+            take_while_m_n(1, 6, |c: Char| c.is_ascii_digit() || c == b'+' || c == b'-'),
+            |b: &Buf| b.try_into(),
+        ),
         ascii_char(ETX),
     )(buf)
 }

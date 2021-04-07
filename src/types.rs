@@ -393,6 +393,37 @@ impl FromStr for Value {
     }
 }
 
+impl TryFrom<&[u8]> for Value {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        let fmt = match value.len() {
+            1..=5 => ValueFormat::Normal,
+            6 => ValueFormat::Wide,
+            _ => invalid_value().fail()?,
+        };
+        let (pos, dig) = match value[0] {
+            b'+' => (true, &value[1..]),
+            b'-' => (false, &value[1..]),
+            b'0'..=b'9' => (true, value),
+            _ => invalid_value().fail()?,
+        };
+        let mut val = 0;
+        for c in dig {
+            let d = (*c - b'0') as i32;
+            if !(0..=9).contains(&d) {
+                invalid_value().fail()?;
+            }
+            val = val * 10 + d;
+        }
+        if !pos {
+            val = -val;
+        }
+
+        Ok(Value(val, fmt))
+    }
+}
+
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
@@ -416,6 +447,7 @@ impl Deref for Value {
 #[cfg(test)]
 mod value_tests {
     use crate::Value;
+    use std::convert::TryInto;
 
     #[test]
     fn test_valid_values() {
@@ -425,6 +457,8 @@ mod value_tests {
             let b = v.to_bytes();
             let s = std::str::from_utf8(b.as_ref()).unwrap();
             assert_eq!(s.parse::<Value>().unwrap(), v);
+            let from_u8: Value = b.as_ref().try_into().unwrap();
+            assert_eq!(from_u8, v);
             assert_eq!(s.parse::<i32>().unwrap(), *v);
         }
     }
