@@ -9,7 +9,7 @@
 //! #
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! use x328_proto::{Master, IntoAddress, IntoParameter, IntoValue};
-//! use x328_proto::master::{Receiver, ReceiveDataProgress, WriteResult};
+//! use x328_proto::master::{Receiver, ReceiveDataProgress};
 //! let mut master = Master::new();
 //! let mut serial = connect_serial_interface()?;
 //!
@@ -18,7 +18,7 @@
 //!                                   (-30_i16).into());
 //! serial.write_all(send.get_data())?;
 //! let mut recv = send.data_sent();
-//! let res: WriteResult = loop {
+//! loop {
 //!     let mut buf = [0; 20];
 //!     let len = serial.read(&mut buf[..])?;
 //!     if len == 0 {
@@ -29,26 +29,22 @@
 //!         ReceiveDataProgress::NeedData(new_recv) => recv = new_recv,
 //!         ReceiveDataProgress::Done(response) => break response,
 //!     }
-//! };
-//! match res {
-//!     WriteResult::WriteOk => Ok(()),
-//!     WriteResult::WriteFailed => Err(()), // Node replied NAK
-//!     WriteResult::ProtocolError => Err(()), // Bad data received, or similar problem
-//! };
+//! }?;
 //!
 //! # Ok(())}
 //! ```
 
 use arrayvec::ArrayVec;
+use snafu::Snafu;
 
 use std::fmt::{Debug, Formatter};
+use std::marker::PhantomData;
 
 use crate::ascii::*;
 use crate::bcc;
 use crate::buffer::Buffer;
 use crate::nom_parser::master::{parse_read_response, parse_write_response, ResponseToken};
 use crate::types::{Address, Parameter, Value};
-use std::marker::PhantomData;
 
 #[derive(Copy, Clone)]
 struct NodeState {
@@ -217,12 +213,7 @@ pub trait Receiver<Response>: Sized + private::Receiver {
     fn receive_data(self, data: &[u8]) -> ReceiveDataProgress<Self, Response>;
 }
 
-#[derive(Debug, PartialEq)]
-pub enum WriteResult {
-    WriteOk,
-    WriteFailed,
-    ProtocolError,
-}
+type WriteResult = Result<(), Error>;
 
 /// Call [receive_data()](Receiver::receive_data()) to process the
 /// received response data from the node.
@@ -245,21 +236,25 @@ impl private::Receiver for ReceiveWriteResponse<'_> {}
 
 impl Receiver<WriteResult> for ReceiveWriteResponse<'_> {
     fn receive_data(mut self, data: &[u8]) -> ReceiveDataProgress<Self, WriteResult> {
-        use ResponseToken::*;
         self.buffer.write(data);
 
         ReceiveDataProgress::Done(match parse_write_response(self.buffer.as_ref()) {
-            WriteOk => WriteResult::WriteOk,
-            WriteFailed | InvalidParameter => WriteResult::WriteFailed,
-            _ => WriteResult::ProtocolError,
+            ResponseToken::WriteOk => Ok(()),
+            ResponseToken::WriteFailed | ResponseToken::InvalidParameter => CommandFailed.fail(),
+            _ => ProtocolError.fail(),
         })
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub enum ReadResult {
+type ReadResult = Result<Value, Error>;
+
+#[derive(Debug, Snafu)]
+pub enum Error {
+    #[snafu(display("Node responded EOT to command."))]
     InvalidParameter,
-    Ok(Value),
+    #[snafu(display("Node responded NAK to command."))]
+    CommandFailed,
+    #[snafu(display("Invalid response from node."))]
     ProtocolError,
 }
 
@@ -290,17 +285,16 @@ impl private::Receiver for ReceiveReadResponse<'_> {}
 
 impl Receiver<ReadResult> for ReceiveReadResponse<'_> {
     fn receive_data(mut self, data: &[u8]) -> ReceiveDataProgress<Self, ReadResult> {
-        use ResponseToken::*;
         self.buffer.write(data);
 
         ReceiveDataProgress::Done(match parse_read_response(self.buffer.as_ref()) {
-            NeedData => return ReceiveDataProgress::NeedData(self),
-            ReadOK { parameter, value } if (parameter == self.expected_param) => {
+            ResponseToken::NeedData => return ReceiveDataProgress::NeedData(self),
+            ResponseToken::ReadOK { parameter, value } if (parameter == self.expected_param) => {
                 self.master.read_again = Some((self.address, parameter));
                 ReadResult::Ok(value)
             }
-            InvalidParameter => ReadResult::InvalidParameter,
-            _ => ReadResult::ProtocolError,
+            ResponseToken::InvalidParameter => InvalidParameter {}.fail(),
+            _ => ProtocolError.fail(),
         })
     }
 }
@@ -308,7 +302,7 @@ impl Receiver<ReadResult> for ReceiveReadResponse<'_> {
 pub mod io {
     use snafu::{Backtrace, OptionExt, ResultExt, Snafu};
 
-    use crate::master::{ReadResult, ReceiveDataProgress, Receiver, SendData, WriteResult};
+    use crate::master::{Error as X328Error, ReceiveDataProgress, Receiver, SendData};
     use crate::types::{IntoAddress, IntoParameter, IntoValue, Value};
     use crate::{Address, Parameter};
     use std::io::{Read, Write};
@@ -317,12 +311,11 @@ pub mod io {
     pub enum Error {
         #[snafu(display("Invalid argument: {} out of range", arg))]
         InvalidArgument { arg: &'static str },
-        #[snafu(display("X3.28 invalid parameter"))]
-        InvalidParameter { backtrace: Backtrace },
-        #[snafu(display("X3.28 write received NAK response"))]
-        WriteFailed { backtrace: Backtrace },
-        #[snafu(display("X3.28 error: bad transmission."))]
-        BusDataError { backtrace: Backtrace },
+        #[snafu(display("X3.28 command error"))]
+        CommandError {
+            source: X328Error,
+            backtrace: Backtrace,
+        },
         #[snafu(display("X3.28 IO error: {}", source))]
         IoError {
             source: std::io::Error,
@@ -417,11 +410,7 @@ pub mod io {
                 .write_parameter(address, parameter, value)
                 .write_to(&mut self.stream)?
                 .receive_from(&mut self.stream)?;
-            match response {
-                WriteResult::WriteOk => Ok(()),
-                WriteResult::WriteFailed => WriteFailed {}.fail(),
-                WriteResult::ProtocolError => BusDataError {}.fail(),
-            }
+            response.context(CommandError)
         }
 
         pub fn read_parameter(
@@ -435,11 +424,7 @@ pub mod io {
                 .read_parameter(address, parameter)
                 .write_to(&mut self.stream)?
                 .receive_from(&mut self.stream)?;
-            match response {
-                ReadResult::Ok(value) => Ok(value),
-                ReadResult::InvalidParameter => InvalidParameter {}.fail(),
-                ReadResult::ProtocolError => BusDataError {}.fail(),
-            }
+            response.context(CommandError)
         }
     } // impl Master
 
