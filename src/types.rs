@@ -2,7 +2,7 @@ use snafu::{ensure, Backtrace, OptionExt, Snafu};
 
 use arrayvec::ArrayVec;
 use std::convert::{TryFrom, TryInto};
-use std::ops::Deref;
+use std::ops::{Deref, RangeInclusive};
 use std::str::FromStr;
 
 #[derive(Debug, Snafu)]
@@ -269,15 +269,18 @@ pub struct Value(i32, ValueFormat);
 
 pub(crate) type ValueBytes = ArrayVec<u8, 6>;
 
+const VAL_RANGE: RangeInclusive<i32> = -99999..=999999;
+const VAL_MIN_NORM: i32 = -9999;
+
 impl Value {
     /// Try to create a Value from the given i32 integer. Returns None if the
     /// the given integer is out of range.
-    pub const fn try_from_i32(value: i32) -> Option<Value> {
-        if value < -99999 || value > 99999 {
+    pub fn try_from_i32(value: i32) -> Option<Value> {
+        if !VAL_RANGE.contains(&value) {
             return None;
         }
         let fmt = {
-            if value < -9999 {
+            if value < VAL_MIN_NORM {
                 ValueFormat::Wide
             } else {
                 ValueFormat::Normal
@@ -297,48 +300,28 @@ impl Value {
 
     /// Format the value into the on-wire representation.
     pub(crate) fn to_bytes(&self) -> ValueBytes {
-        match self.1 {
-            ValueFormat::Wide => {
-                let mut buf = [0_u8; 6];
-                let mut val = self.0;
-                buf[0] = match val >= 0 {
-                    true => b'+',
-                    false => b'-',
-                };
-                for b in (&mut buf[1..]).iter_mut().rev() {
-                    *b = b'0' + (val % 10) as u8;
-                    val /= 10;
-                }
-                debug_assert_eq!(val, 0, "Value didn't fit in Wide format: {}.", self.0);
-                buf.into()
-            }
-            ValueFormat::Normal => {
-                let mut buf = ValueBytes::new();
-                let mut val = self.0;
-                let positive = val >= 0;
-                loop {
-                    buf.push(b'0' + (val % 10) as u8);
-                    val /= 10;
-                    if val == 0 {
-                        break;
-                    }
-                }
-                if buf.len() < 5 {
-                    buf.push(match positive {
-                        true => b'+',
-                        false => b'-',
-                    });
-                } else {
-                    debug_assert!(
-                        positive && buf.len() == 5,
-                        "Value to large to transmit in Normal X3.28 format: {}.",
-                        self.0
-                    );
-                }
-                buf.reverse();
-                buf
+        let (positive, mut val) = if self.0 >= 0 {
+            (true, self.0)
+        } else {
+            (false, -self.0)
+        };
+
+        let mut buf = ValueBytes::new();
+        loop {
+            buf.push(b'0' + (val % 10) as u8); // panics on overflow
+            val /= 10;
+            if val == 0 && (self.1 == ValueFormat::Normal || buf.len() == 5) {
+                break;
             }
         }
+        if !positive || !buf.is_full() {
+            buf.push(match positive {
+                true => b'+',
+                false => b'-',
+            });
+        }
+        buf.reverse();
+        buf
     }
 }
 
@@ -358,11 +341,11 @@ where
 {
     fn into_value(self) -> Option<Value> {
         let value = self.into();
-        if !(-99999..=99999).contains(&value) {
+        if !VAL_RANGE.contains(&value) {
             return None;
         }
         let fmt = {
-            if value < -9999 {
+            if value < VAL_MIN_NORM {
                 ValueFormat::Wide
             } else {
                 ValueFormat::Normal
@@ -388,7 +371,7 @@ impl From<u16> for Value {
 
 impl From<i16> for Value {
     fn from(val: i16) -> Self {
-        let fmt = if val < -9999 {
+        let fmt = if (val as i32) < VAL_MIN_NORM {
             ValueFormat::Wide
         } else {
             ValueFormat::Normal
@@ -427,5 +410,22 @@ impl Deref for Value {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+#[cfg(test)]
+mod value_tests {
+    use crate::Value;
+
+    #[test]
+    fn test_valid_values() {
+        for n in -99999..=999999 {
+            let v = Value::try_from_i32(n).expect("OK value");
+            assert_eq!(*v, n);
+            let b = v.to_bytes();
+            let s = std::str::from_utf8(b.as_ref()).unwrap();
+            assert_eq!(s.parse::<Value>().unwrap(), v);
+            assert_eq!(s.parse::<i32>().unwrap(), *v);
+        }
     }
 }
