@@ -208,7 +208,10 @@ pub(crate) mod node {
 }
 
 fn parameter(buf: &Buf) -> IResult<&Buf, Parameter> {
-    map_int(take_while_m_n(4, 4, |c: Char| c.is_ascii_digit()))(buf)
+    map_res(
+        take_while_m_n(4, 4, |c: Char| c.is_ascii_digit()),
+        |b: &Buf| b.try_into(),
+    )(buf)
 }
 
 fn x328_value(buf: &Buf) -> IResult<&Buf, Value> {
@@ -230,18 +233,6 @@ fn stx_param_value_etx_bcc(buf: &Buf) -> IResult<&Buf, (Parameter, Value)> {
 
 fn ascii_char<'a>(ascii_char: u8) -> impl Fn(&'a Buf) -> IResult<&'a Buf, char> {
     nom::character::streaming::char(ascii_char as char)
-}
-
-fn map_int<'a, O, F>(first: F) -> impl FnMut(&'a Buf) -> IResult<&'a Buf, O>
-where
-    F: Fn(&'a Buf) -> IResult<&'a Buf, &'a Buf>,
-    O: std::str::FromStr,
-{
-    // for [u8] buffer
-    let to_str = map_res(first, |u: &'a Buf| std::str::from_utf8(u));
-    // for &str buffer
-    //let to_str = first;
-    map_res(to_str, |s| s.parse::<O>())
 }
 
 fn bcc(s: &Buf) -> u8 {

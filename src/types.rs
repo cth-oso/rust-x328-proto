@@ -195,6 +195,25 @@ impl FromStr for Parameter {
     }
 }
 
+impl TryFrom<&[u8]> for Parameter {
+    type Error = Error;
+
+    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
+        if value.len() != 4 {
+            invalid_parameter().fail()?;
+        }
+        let mut val = 0;
+        for c in value {
+            let d = *c as i16 - b'0' as i16;
+            if !(0..=9).contains(&d) {
+                invalid_parameter().fail()?;
+            }
+            val = val * 10 + d;
+        }
+        Parameter::new(val)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{Address, Parameter};
