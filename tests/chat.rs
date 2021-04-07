@@ -17,16 +17,8 @@ fn master_main_loop(io: BusInterface) -> Result<(), master::io::Error> {
 
     for _ in 1..4 {
         for addr in 5..6 {
-            println!("master send write");
-            match master.write_parameter(addr, 20, (30 + addr) as i32) {
-                Ok(()) => println!("master: write ok"),
-                Err(err) => println!("master: write error {:?}", err),
-            }
-
-            match master.read_parameter(addr, 20) {
-                Ok(val) => println!("Master read param ok {}", *val),
-                Err(err) => println!("Master read error {:?}", err),
-            }
+            master.write_parameter(addr, 20, (30 + addr) as i32)?;
+            master.read_parameter(addr, 20)?;
         }
     }
     // test read again
@@ -34,7 +26,6 @@ fn master_main_loop(io: BusInterface) -> Result<(), master::io::Error> {
     for _ in 0..10 {
         assert!(master.read_parameter(5, 25).is_ok());
     }
-    println!("Master terminating");
     Ok(())
 }
 
@@ -50,18 +41,15 @@ fn node_main_loop(mut serial: BusInterface) {
                 let mut buf = [0; 1];
                 if let Ok(len) = serial.read(&mut buf) {
                     if len == 0 {
-                        println!("Short read");
                         break 'main;
                     }
                     recv.receive_data(&buf[..len])
                 } else {
-                    println!("Node read error");
                     break 'main;
                 }
             }
 
             BusNode::SendData(mut send) => {
-                println!("Node sending data");
                 serial.write_all(send.send_data().as_ref()).unwrap();
                 send.data_sent()
             }
@@ -74,14 +62,9 @@ fn node_main_loop(mut serial: BusInterface) {
                 }
             }
 
-            BusNode::WriteParameter(write_command) => {
-                let param = write_command.parameter();
-                println!("Write to parameter {:?}", param);
-                write_command.write_ok()
-            }
+            BusNode::WriteParameter(write_command) => write_command.write_ok(),
         };
     }
-    println!("Node terminating");
 }
 
 static SHUTDOWN: AtomicBool = AtomicBool::new(false);
@@ -103,11 +86,9 @@ fn chat1() {
         .join()
         .expect("Join failed")
         .expect("Master returned an error");
-    println!("Master joined");
 
     SHUTDOWN.store(true, SeqCst);
     bus.wake_blocked_nodes();
 
     node.join().expect("Node panicked");
-    println!("Node joined")
 }

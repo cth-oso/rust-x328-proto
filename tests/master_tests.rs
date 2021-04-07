@@ -11,7 +11,6 @@ fn master_main_loop() {
     let data_in = [STX, ACK];
     let serial_sim = SerialInterface::new(&data_in);
     let mut serial = SerialIOPlane::new(&serial_sim);
-    // let mut registers: HashMap<Parameter, Value> = HashMap::new();
 
     let mut master = io::Master::new(&mut serial);
     let addr10 = Address::new(10).unwrap();
@@ -23,9 +22,7 @@ fn master_main_loop() {
     master
         .write_parameter(addr10, param20, 3)
         .expect_err("Bus write error should have resulted in Error response");
-    let x = master.write_parameter(addr10, param20, 3);
-    println!("Write success: {:?}", x);
-    x.unwrap();
+    master.write_parameter(addr10, param20, 3).unwrap();
 }
 
 #[test]
