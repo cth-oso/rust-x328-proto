@@ -43,7 +43,7 @@ use crate::types::{Address, Error as TypeError, IntoAddress, Parameter, Value};
 ///            }
 ///
 ///            BusNode::SendData(mut send) => {
-///                serial.write_all(send.send_data().as_ref()).unwrap();
+///                serial.write_all(send.get_data()).unwrap();
 ///                send.data_sent()
 ///            }
 ///
@@ -227,7 +227,7 @@ impl SendData {
     }
 
     /// Returns the data to be sent on the bus.
-    pub fn send_data(&mut self) -> &[u8] {
+    pub fn get_data(&mut self) -> &[u8] {
         self.data.as_ref()
     }
 

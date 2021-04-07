@@ -21,7 +21,7 @@ fn node_main_loop() -> Result<(), Box<dyn Error>> {
             }
 
             BusNode::SendData(mut send) => {
-                io::stdout().write_all(send.send_data().as_ref())?;
+                io::stdout().write_all(send.get_data())?;
                 send.data_sent()
             }
 
