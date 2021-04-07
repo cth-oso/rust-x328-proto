@@ -1,4 +1,44 @@
 //! The bus controller half of the X3.28 protocol
+//!
+//! # Example
+//! See [`crate::master::io::Master`] for a more elaborate example of synchronus IO.
+//! ```
+//! # use std::io::{Read, Write, Cursor};
+//! # fn connect_serial_interface() -> Result<Cursor<Vec<u8>>,  &'static str>
+//! # { Ok(Cursor::new(Vec::new())) }
+//! #
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! use x328_proto::{Master, IntoAddress, IntoParameter, IntoValue};
+//! use x328_proto::master::{Receiver, ReceiveDataProgress, WriteResult};
+//! let mut master = Master::new();
+//! let mut serial = connect_serial_interface()?;
+//!
+//! let send = master.write_parameter(10.into_address()?,
+//!                                   3010.into_parameter()?,
+//!                                   (-30_i16).into());
+//! serial.write_all(send.get_data())?;
+//! let mut recv = send.data_sent();
+//! let res: WriteResult = loop {
+//!     let mut buf = [0; 20];
+//!     let len = serial.read(&mut buf[..])?;
+//!     if len == 0 {
+//!         // .. error handling ..
+//!         # return Ok(());
+//!     }
+//!     match recv.receive_data(&buf[..len]) {
+//!         ReceiveDataProgress::NeedData(new_recv) => recv = new_recv,
+//!         ReceiveDataProgress::Done(response) => break response,
+//!     }
+//! };
+//! match res {
+//!     WriteResult::WriteOk => Ok(()),
+//!     WriteResult::WriteFailed => Err(()), // Node replied NAK
+//!     WriteResult::ProtocolError => Err(()), // Bad data received, or similar problem
+//! };
+//!
+//! # Ok(())}
+//! ```
+
 use arrayvec::ArrayVec;
 
 use std::fmt::{Debug, Formatter};
@@ -49,8 +89,12 @@ impl Master {
 
     /// Initiate a write command to a node.
     ///
-    /// The returned struct holds the data that needs to be transmitted
-    /// on the bus.
+    /// The returned [SendData] struct holds the data that needs to be transmitted
+    /// on the bus. It also holds a mutable reference to self, so that only one
+    /// operation can be in progress at a time.
+    ///
+    /// Timeouts and other errors can be handled by dropping the SendData or
+    /// ReceiveResponse structs.
     pub fn write_parameter(
         &mut self,
         address: Address,
@@ -72,7 +116,7 @@ impl Master {
     /// Initiate a read command to a node.
     ///
     /// The returned [SendData] struct holds the data that needs to be transmitted
-    /// on the bus.
+    /// on the bus. See also [write_parameter()](Self::write_parameter()).
     pub fn read_parameter(
         &mut self,
         address: Address,
@@ -357,7 +401,7 @@ pub mod io {
                 .set_node_capabilities(address.into_address().unwrap(), value);
         }
 
-        /// Sends a write command to the node. May use the shorter "write again" command form
+        /// Sends a write command to the node.
         pub fn write_parameter(
             &mut self,
             address: impl IntoAddress,
