@@ -158,7 +158,7 @@ mod private {
 /// Return value from Receiver::receive_data()
 /// Indicates if enough data has been received or if more data is needed.
 /// R is the receiver (Self), T is Self::Response
-pub enum ReceiveDataResult<R, T> {
+pub enum ReceiveDataProgress<R, T> {
     Done(T),
     NeedData(R),
 }
@@ -170,7 +170,7 @@ pub trait Receiver<Response>: Sized + private::Receiver {
     ///
     /// Note that the method consumes self, so it must be reclaimed
     /// from the return value.
-    fn receive_data(self, data: &[u8]) -> ReceiveDataResult<Self, Response>;
+    fn receive_data(self, data: &[u8]) -> ReceiveDataProgress<Self, Response>;
 }
 
 #[derive(Debug, PartialEq)]
@@ -200,11 +200,11 @@ impl<'a> ReceiveWriteResponse<'a> {
 impl private::Receiver for ReceiveWriteResponse<'_> {}
 
 impl Receiver<WriteResult> for ReceiveWriteResponse<'_> {
-    fn receive_data(mut self, data: &[u8]) -> ReceiveDataResult<Self, WriteResult> {
+    fn receive_data(mut self, data: &[u8]) -> ReceiveDataProgress<Self, WriteResult> {
         use ResponseToken::*;
         self.buffer.write(data);
 
-        ReceiveDataResult::Done(match parse_write_response(self.buffer.as_ref()) {
+        ReceiveDataProgress::Done(match parse_write_response(self.buffer.as_ref()) {
             WriteOk => WriteResult::WriteOk,
             WriteFailed | InvalidParameter => WriteResult::WriteFailed,
             _ => WriteResult::ProtocolError,
@@ -245,12 +245,12 @@ impl<'a> ReceiveReadResponse<'a> {
 impl private::Receiver for ReceiveReadResponse<'_> {}
 
 impl Receiver<ReadResult> for ReceiveReadResponse<'_> {
-    fn receive_data(mut self, data: &[u8]) -> ReceiveDataResult<Self, ReadResult> {
+    fn receive_data(mut self, data: &[u8]) -> ReceiveDataProgress<Self, ReadResult> {
         use ResponseToken::*;
         self.buffer.write(data);
 
-        ReceiveDataResult::Done(match parse_read_response(self.buffer.as_ref()) {
-            NeedData => return ReceiveDataResult::NeedData(self),
+        ReceiveDataProgress::Done(match parse_read_response(self.buffer.as_ref()) {
+            NeedData => return ReceiveDataProgress::NeedData(self),
             ReadOK { parameter, value } if (parameter == self.expected_param) => {
                 self.master.read_again = Some((self.address, parameter));
                 ReadResult::Ok(value)
@@ -264,7 +264,7 @@ impl Receiver<ReadResult> for ReceiveReadResponse<'_> {
 pub mod io {
     use snafu::{Backtrace, OptionExt, ResultExt, Snafu};
 
-    use crate::master::{ReadResult, ReceiveDataResult, Receiver, SendData, WriteResult};
+    use crate::master::{ReadResult, ReceiveDataProgress, Receiver, SendData, WriteResult};
     use crate::types::{IntoAddress, IntoParameter, IntoValue, Value};
     use crate::{Address, Parameter};
     use std::io::{Read, Write};
@@ -305,8 +305,8 @@ pub mod io {
                 .context(IoError {})?;
 
                 match self.receive_data(&data[..len]) {
-                    ReceiveDataResult::Done(response) => return Ok(response),
-                    ReceiveDataResult::NeedData(reader) => self = reader,
+                    ReceiveDataProgress::Done(response) => return Ok(response),
+                    ReceiveDataProgress::NeedData(reader) => self = reader,
                 }
             }
         }
