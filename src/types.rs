@@ -16,15 +16,15 @@ pub enum Error {
     InvalidValue { backtrace: Backtrace },
 }
 
-fn invalid_address() -> InvalidAddress {
+const fn invalid_address() -> InvalidAddress {
     InvalidAddress {}
 }
 
-fn invalid_parameter() -> InvalidParameter {
+const fn invalid_parameter() -> InvalidParameter {
     InvalidParameter {}
 }
 
-fn invalid_value() -> InvalidValue {
+const fn invalid_value() -> InvalidValue {
     InvalidValue {}
 }
 
@@ -43,12 +43,12 @@ pub struct Address(u8);
 
 impl Address {
     /// Create a new address, checking that the address is in \[0,99\].
-    pub fn new(address: u8) -> Result<Address, Error> {
+    pub fn new(address: u8) -> Result<Self, Error> {
         ensure!(address <= 99, invalid_address());
-        Ok(Address(address))
+        Ok(Self(address))
     }
 
-    pub(crate) fn to_bytes(&self) -> [u8; 4] {
+    pub(crate) const fn to_bytes(self) -> [u8; 4] {
         let mut buf = [0; 4];
         buf[0] = 0x30 + self.0 / 10;
         buf[1] = buf[0];
@@ -57,7 +57,7 @@ impl Address {
         buf
     }
 
-    pub fn as_usize(&self) -> usize {
+    pub const fn as_usize(self) -> usize {
         self.0 as usize
     }
 }
@@ -100,7 +100,7 @@ impl TryFrom<usize> for Address {
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
         ensure!(value <= 99, invalid_address());
-        Address::new(value as u8)
+        Self::new(value as u8)
     }
 }
 
@@ -110,7 +110,7 @@ impl FromStr for Address {
     /// This is meant to be used for parsing the on-wire format
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         ensure!(s.len() == 2, invalid_address());
-        Address::new(s.parse().ok().with_context(invalid_address)?)
+        Self::new(s.parse().ok().with_context(invalid_address)?)
     }
 }
 
@@ -123,16 +123,16 @@ pub(crate) type ParameterOffset = i16;
 impl Parameter {
     /// Create a new Parameter, checking that the given value
     /// is in the range [0, 9999].
-    pub fn new(parameter: i16) -> Result<Parameter, Error> {
+    pub fn new(parameter: i16) -> Result<Self, Error> {
         ensure!((0..=9999).contains(&parameter), invalid_parameter());
-        Ok(Parameter(parameter))
+        Ok(Self(parameter))
     }
 
-    pub(crate) fn checked_add(&self, offset: ParameterOffset) -> Result<Parameter, Error> {
-        Parameter::new(self.0.checked_add(offset).with_context(invalid_parameter)?)
+    pub(crate) fn checked_add(self, offset: ParameterOffset) -> Result<Self, Error> {
+        Self::new(self.0.checked_add(offset).with_context(invalid_parameter)?)
     }
 
-    pub(crate) fn to_bytes(&self) -> [u8; 4] {
+    pub(crate) fn to_bytes(self) -> [u8; 4] {
         let mut buf = [0; 4];
         let mut x = self.0;
         for c in buf.iter_mut().rev() {
@@ -181,7 +181,7 @@ impl TryFrom<usize> for Parameter {
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
         ensure!(value <= 9999, invalid_parameter());
-        Parameter::new(value as i16)
+        Self::new(value as i16)
     }
 }
 
@@ -191,7 +191,7 @@ impl FromStr for Parameter {
     /// This is meant to be used for parsing the on-wire format
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         ensure!(s.len() == 4, invalid_parameter());
-        Parameter::new(s.parse().ok().with_context(invalid_parameter)?)
+        Self::new(s.parse().ok().with_context(invalid_parameter)?)
     }
 }
 
@@ -199,18 +199,10 @@ impl TryFrom<&[u8]> for Parameter {
     type Error = Error;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        if value.len() != 4 {
-            invalid_parameter().fail()?;
-        }
-        let mut val = 0;
-        for c in value {
-            let d = *c as i16 - b'0' as i16;
-            if !(0..=9).contains(&d) {
-                invalid_parameter().fail()?;
-            }
-            val = val * 10 + d;
-        }
-        Parameter::new(val)
+        std::str::from_utf8(value)
+            .ok()
+            .with_context(invalid_parameter)
+            .and_then(|s| Parameter::from_str(s))
     }
 }
 
@@ -288,13 +280,13 @@ pub struct Value(i32, ValueFormat);
 
 pub(crate) type ValueBytes = ArrayVec<u8, 6>;
 
-const VAL_RANGE: RangeInclusive<i32> = -99999..=999999;
+const VAL_RANGE: RangeInclusive<i32> = -99_999..=999_999;
 const VAL_MIN_NORM: i32 = -9999;
 
 impl Value {
     /// Try to create a Value from the given i32 integer. Returns None if the
     /// the given integer is out of range.
-    pub fn try_from_i32(value: i32) -> Option<Value> {
+    pub fn try_from_i32(value: i32) -> Option<Self> {
         if !VAL_RANGE.contains(&value) {
             return None;
         }
@@ -305,20 +297,16 @@ impl Value {
                 ValueFormat::Normal
             }
         };
-        Some(Value(value, fmt))
+        Some(Self(value, fmt))
     }
 
     /// Returns the contained value as u16 if it can be converted to u16 without truncation.
-    pub fn try_u16(&self) -> Option<u16> {
-        if (0..=u16::MAX as i32).contains(&self.0) {
-            Some(self.0 as u16)
-        } else {
-            None
-        }
+    pub fn try_u16(self) -> Option<u16> {
+        u16::try_from(self.0).ok()
     }
 
     /// Format the value into the on-wire representation.
-    pub(crate) fn to_bytes(&self) -> ValueBytes {
+    pub(crate) fn to_bytes(self) -> ValueBytes {
         let (positive, mut val) = if self.0 >= 0 {
             (true, self.0)
         } else {
@@ -333,11 +321,10 @@ impl Value {
                 break;
             }
         }
-        if !positive || !buf.is_full() {
-            buf.push(match positive {
-                true => b'+',
-                false => b'-',
-            });
+        if !positive {
+            buf.push(b'-');
+        } else if !buf.is_full() {
+            buf.push(b'+');
         }
         buf.reverse();
         buf
@@ -345,12 +332,12 @@ impl Value {
 }
 
 pub trait IntoValue {
-    fn into_value(self) -> Option<Value>;
+    fn into_value(self) -> Result<Value, Error>;
 }
 
 impl IntoValue for Value {
-    fn into_value(self) -> Option<Value> {
-        Some(self)
+    fn into_value(self) -> Result<Value, Error> {
+        Ok(self)
     }
 }
 
@@ -358,10 +345,10 @@ impl<T> IntoValue for T
 where
     T: Into<i32>,
 {
-    fn into_value(self) -> Option<Value> {
+    fn into_value(self) -> Result<Value, Error> {
         let value = self.into();
         if !VAL_RANGE.contains(&value) {
-            return None;
+            return invalid_value().fail();
         }
         let fmt = {
             if value < VAL_MIN_NORM {
@@ -370,7 +357,7 @@ where
                 ValueFormat::Normal
             }
         };
-        Some(Value(value, fmt))
+        Ok(Value(value, fmt))
     }
 }
 
@@ -378,24 +365,25 @@ impl TryFrom<i32> for Value {
     type Error = Error;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
-        Value::try_from_i32(value).with_context(invalid_value)
+        Self::try_from_i32(value).with_context(invalid_value)
     }
 }
 
 impl From<u16> for Value {
     fn from(val: u16) -> Self {
-        Value(val as i32, ValueFormat::Normal)
+        Self(val.into(), ValueFormat::Normal)
     }
 }
 
 impl From<i16> for Value {
     fn from(val: i16) -> Self {
-        let fmt = if (val as i32) < VAL_MIN_NORM {
+        let val = val.into();
+        let fmt = if val < VAL_MIN_NORM {
             ValueFormat::Wide
         } else {
             ValueFormat::Normal
         };
-        Value(val as i32, fmt)
+        Self(val, fmt)
     }
 }
 
@@ -408,7 +396,7 @@ impl FromStr for Value {
             6 => ValueFormat::Wide,
             _ => return invalid_value().fail(),
         };
-        Ok(Value(s.parse().ok().with_context(invalid_value)?, fmt))
+        Ok(Self(s.parse().ok().with_context(invalid_value)?, fmt))
     }
 }
 
@@ -416,30 +404,10 @@ impl TryFrom<&[u8]> for Value {
     type Error = Error;
 
     fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let fmt = match value.len() {
-            1..=5 => ValueFormat::Normal,
-            6 => ValueFormat::Wide,
-            _ => invalid_value().fail()?,
-        };
-        let (pos, dig) = match value[0] {
-            b'+' => (true, &value[1..]),
-            b'-' => (false, &value[1..]),
-            b'0'..=b'9' => (true, value),
-            _ => invalid_value().fail()?,
-        };
-        let mut val = 0;
-        for c in dig {
-            let d = (*c - b'0') as i32;
-            if !(0..=9).contains(&d) {
-                invalid_value().fail()?;
-            }
-            val = val * 10 + d;
-        }
-        if !pos {
-            val = -val;
-        }
-
-        Ok(Value(val, fmt))
+        let s = std::str::from_utf8(value)
+            .ok()
+            .with_context(invalid_value)?;
+        Self::from_str(s)
     }
 }
 
@@ -470,7 +438,7 @@ mod value_tests {
 
     #[test]
     fn test_valid_values() {
-        for n in -99999..=999999 {
+        for n in -99999..=999_999 {
             let v = Value::try_from_i32(n).expect("OK value");
             assert_eq!(*v, n);
             let b = v.to_bytes();

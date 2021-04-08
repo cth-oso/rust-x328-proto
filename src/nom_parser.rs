@@ -13,21 +13,21 @@ use std::convert::TryInto;
 type Char = u8;
 type Buf = [u8];
 
-pub(crate) mod master {
+pub mod master {
     use super::*;
     use nom::combinator::all_consuming;
 
     #[derive(PartialEq, Copy, Clone, Debug)]
-    pub(crate) enum ResponseToken {
+    pub enum ResponseToken {
         WriteOk,
         WriteFailed,
         InvalidParameter,
-        ReadOK { parameter: Parameter, value: Value },
+        ReadOk { parameter: Parameter, value: Value },
         NeedData,
         InvalidDataReceived,
     }
 
-    pub(crate) fn parse_write_response(buf: &Buf) -> ResponseToken {
+    pub fn parse_write_response(buf: &Buf) -> ResponseToken {
         parse_response(all_consuming(alt((
             value(ResponseToken::WriteOk, ascii_char(ACK)),
             value(ResponseToken::WriteFailed, ascii_char(NAK)),
@@ -35,16 +35,16 @@ pub(crate) mod master {
         )))(buf))
     }
 
-    pub(crate) fn parse_read_response(buf: &Buf) -> ResponseToken {
+    pub fn parse_read_response(buf: &Buf) -> ResponseToken {
         parse_response(all_consuming(alt((
             value(ResponseToken::InvalidParameter, ascii_char(EOT)),
             map(stx_param_value_etx_bcc, |(parameter, value)| {
-                ResponseToken::ReadOK { parameter, value }
+                ResponseToken::ReadOk { parameter, value }
             }),
         )))(buf))
     }
 
-    fn parse_response(alt_match: IResult<&Buf, ResponseToken>) -> ResponseToken {
+    const fn parse_response(alt_match: IResult<&Buf, ResponseToken>) -> ResponseToken {
         match alt_match {
             Ok((_buf, token)) => token,
             Err(Incomplete(_)) => ResponseToken::NeedData,
@@ -53,12 +53,12 @@ pub(crate) mod master {
     }
 }
 
-pub(crate) mod node {
+pub mod node {
     use super::*;
     use CommandToken::*;
 
     #[derive(PartialEq, Debug, Copy, Clone)]
-    pub(crate) enum CommandToken {
+    pub enum CommandToken {
         WriteParameter(Address, Parameter, Value),
         ReadParameter(Address, Parameter),
         ReadAgain(ParameterOffset),
@@ -66,7 +66,7 @@ pub(crate) mod node {
         NeedData,
     }
 
-    pub(crate) fn parse_command(buf: &Buf) -> (usize, CommandToken) {
+    pub fn parse_command(buf: &Buf) -> (usize, CommandToken) {
         let (remaining, token) = alt_match(buf);
         (buf.len() - remaining.len(), token)
     }
@@ -355,7 +355,7 @@ mod test_public_interface {
 
         // Valid response
         match parse_read_response(&buf) {
-            ResponseToken::ReadOK { parameter, value } => {
+            ResponseToken::ReadOk { parameter, value } => {
                 assert_eq!(parameter, 1234);
                 assert_eq!(value, -54321);
             }

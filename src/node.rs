@@ -1,4 +1,4 @@
-//! See [BusNode] for more details.
+//! See [`BusNode`] for more details.
 
 use arrayvec::ArrayVec;
 
@@ -12,7 +12,7 @@ use crate::types::{Address, Error as TypeError, IntoAddress, Parameter, Value};
 ///
 /// This enum represents the different states of the protocol.
 ///
-/// Create a new protocol instance with Node::new(address).
+/// Create a new protocol instance with `Node::new(address)`.
 ///
 /// # Example
 ///
@@ -88,20 +88,19 @@ impl BusNode {
     /// use x328_proto::BusNode;
     /// let mut node: BusNode = BusNode::new(10).unwrap(); // new protocol instance with address 10
     /// ```
-    pub fn new(address: impl IntoAddress) -> Result<BusNode, TypeError> {
+    pub fn new(address: impl IntoAddress) -> Result<Self, TypeError> {
         Ok(ReceiveData::create(address.into_address()?))
     }
 
-    /// Do not send any reply to the master. Transition to the idle ReceiveData state instead.
+    /// Do not send any reply to the master. Transition to the idle `ReceiveData` state instead.
     /// You really shouldn't do this, since this will leave the master waiting until it times out.
-    pub fn no_reply(self) -> BusNode {
-        let state = match self {
-            BusNode::ReceiveData(ReceiveData { state, .. }) => state,
-            BusNode::SendData(SendData { state, .. }) => state,
-            BusNode::ReadParameter(ReadParam { state, .. }) => state,
-            BusNode::WriteParameter(WriteParam { state, .. }) => state,
-        };
-        ReceiveData::from_state(state)
+    pub fn no_reply(self) -> Self {
+        match self {
+            Self::ReceiveData(ReceiveData { state, .. })
+            | Self::SendData(SendData { state, .. })
+            | Self::ReadParameter(ReadParam { state, .. })
+            | Self::WriteParameter(WriteParam { state, .. }) => ReceiveData::from_state(state),
+        }
     }
 }
 
@@ -124,7 +123,7 @@ pub struct ReceiveData {
 
 impl ReceiveData {
     fn create(address: Address) -> BusNode {
-        BusNode::ReceiveData(ReceiveData {
+        BusNode::ReceiveData(Self {
             state: Box::new(NodeStateStruct {
                 address,
                 read_again_param: None,
@@ -134,7 +133,7 @@ impl ReceiveData {
     }
 
     fn from_state(state: NodeState) -> BusNode {
-        BusNode::ReceiveData(ReceiveData {
+        BusNode::ReceiveData(Self {
             state,
             input_buffer: Buffer::new(),
         })
@@ -151,7 +150,7 @@ impl ReceiveData {
     }
 
     fn parse_buffer(mut self) -> BusNode {
-        use CommandToken::*;
+        use CommandToken::{InvalidPayload, ReadAgain, ReadParameter, WriteParameter};
 
         let (token, read_again_param) = loop {
             match parse_command(self.input_buffer.as_ref()) {
@@ -189,7 +188,7 @@ impl ReceiveData {
         }
     }
 
-    fn need_data(self) -> BusNode {
+    const fn need_data(self) -> BusNode {
         BusNode::ReceiveData(self)
     }
 
@@ -217,13 +216,13 @@ pub struct SendData {
 
 impl SendData {
     fn from_state(state: NodeState, data: SendDataStore) -> BusNode {
-        BusNode::SendData(SendData { state, data })
+        BusNode::SendData(Self { state, data })
     }
 
     fn from_byte(state: NodeState, byte: u8) -> BusNode {
         let mut data = ArrayVec::new();
         data.push(byte);
-        BusNode::SendData(SendData { state, data })
+        BusNode::SendData(Self { state, data })
     }
 
     /// Returns the data to be sent on the bus.
@@ -232,7 +231,7 @@ impl SendData {
     }
 
     /// Signals that the data was sent, and it's time to go back to the
-    /// ReadData state.
+    /// `ReadData` state.
     pub fn data_sent(self) -> BusNode {
         ReceiveData::from_state(self.state)
     }
@@ -248,7 +247,7 @@ pub struct ReadParam {
 
 impl ReadParam {
     fn from_state(state: NodeState, address: Address, parameter: Parameter) -> BusNode {
-        BusNode::ReadParameter(ReadParam {
+        BusNode::ReadParameter(Self {
             state,
             address,
             parameter,
@@ -263,8 +262,9 @@ impl ReadParam {
         let mut data = SendDataStore::new();
         data.push(STX);
         data.try_extend_from_slice(&self.parameter.to_bytes())
-            .unwrap();
-        data.try_extend_from_slice(&value.to_bytes()).unwrap();
+            .expect("BUG: Send buffer too small.");
+        data.try_extend_from_slice(&value.to_bytes())
+            .expect("BUG: Send buffer too small.");
         data.push(ETX);
         data.push(bcc(&data[1..]));
 
@@ -282,19 +282,19 @@ impl ReadParam {
         SendData::from_byte(self.state, NAK)
     }
 
-    /// Do not send any reply to the master. Transition to the idle ReceiveData state instead.
+    /// Do not send any reply to the master. Transition to the idle `ReceiveData` state instead.
     /// You really shouldn't do this, since this will leave the master waiting until it times out.
     pub fn no_reply(self) -> BusNode {
         ReceiveData::from_state(self.state)
     }
 
     /// Get the address the request was sent to.
-    pub fn address(&self) -> Address {
+    pub const fn address(&self) -> Address {
         self.address
     }
 
     /// The parameter whose value is to be returned.
-    pub fn parameter(&self) -> Parameter {
+    pub const fn parameter(&self) -> Parameter {
         self.parameter
     }
 }
@@ -315,7 +315,7 @@ impl WriteParam {
         parameter: Parameter,
         value: Value,
     ) -> BusNode {
-        BusNode::WriteParameter(WriteParam {
+        BusNode::WriteParameter(Self {
             state,
             address,
             parameter,
@@ -334,24 +334,24 @@ impl WriteParam {
         SendData::from_byte(self.state, NAK)
     }
 
-    /// Do not send any reply to the master. Transition to the idle ReceiveData state instead.
+    /// Do not send any reply to the master. Transition to the idle `ReceiveData` state instead.
     /// You really shouldn't do this, since this will leave the master waiting until it times out.
     pub fn no_reply(self) -> BusNode {
         ReceiveData::from_state(self.state)
     }
 
     /// The address the write request was sent to.
-    pub fn address(&self) -> Address {
+    pub const fn address(&self) -> Address {
         self.address
     }
 
     /// The parameter to be written.
-    pub fn parameter(&self) -> Parameter {
+    pub const fn parameter(&self) -> Parameter {
         self.parameter
     }
 
     /// The new value for the parameter.
-    pub fn value(&self) -> Value {
+    pub const fn value(&self) -> Value {
         self.value
     }
 }

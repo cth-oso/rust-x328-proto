@@ -1,29 +1,29 @@
 use arrayvec::ArrayVec;
 
 #[derive(Debug)]
-pub(crate) struct Buffer {
+pub struct Buffer {
     data: ArrayVec<u8, 40>, // The maximum X3.28 message length is 18 bytes
     read_pos: usize,
 }
 
 impl Buffer {
-    pub(crate) fn new() -> Buffer {
-        Buffer {
+    pub fn new() -> Self {
+        Self {
             data: ArrayVec::new(),
             read_pos: 0,
         }
     }
 
-    pub(crate) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.data.len() - self.read_pos
     }
 
-    pub(crate) fn consume(&mut self, len: usize) {
+    pub fn consume(&mut self, len: usize) {
         assert!(len <= self.len());
         self.read_pos += len;
     }
 
-    pub(crate) fn write(&mut self, bytes: &[u8]) {
+    pub fn write(&mut self, bytes: &[u8]) {
         if self.read_pos == self.data.len() {
             self.clear();
         }
@@ -40,7 +40,7 @@ impl Buffer {
         }
     }
 
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.data.clear();
         self.read_pos = 0;
     }

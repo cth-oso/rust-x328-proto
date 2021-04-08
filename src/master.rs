@@ -69,13 +69,13 @@ impl Debug for Master {
 
 impl Default for Master {
     fn default() -> Self {
-        Master::new()
+        Self::new()
     }
 }
 
 impl Master {
-    pub fn new() -> Master {
-        Master {
+    pub const fn new() -> Self {
+        Self {
             read_again: None,
             nodes: [NodeState {
                 can_read_again: false,
@@ -85,12 +85,12 @@ impl Master {
 
     /// Initiate a write command to a node.
     ///
-    /// The returned [SendData] struct holds the data that needs to be transmitted
+    /// The returned [`SendData`] struct holds the data that needs to be transmitted
     /// on the bus. It also holds a mutable reference to self, so that only one
     /// operation can be in progress at a time.
     ///
-    /// Timeouts and other errors can be handled by dropping the SendData or
-    /// ReceiveResponse structs.
+    /// Timeouts and other errors can be handled by dropping the `SendData` or
+    /// `ReceiveResponse` structs.
     pub fn write_parameter(
         &mut self,
         address: Address,
@@ -100,10 +100,13 @@ impl Master {
         self.read_again = None;
         let mut data = SendDataStore::new();
         data.push(EOT);
-        data.try_extend_from_slice(&address.to_bytes()).unwrap();
+        data.try_extend_from_slice(&address.to_bytes())
+            .expect("BUG: Send data buffer too small.");
         data.push(STX);
-        data.try_extend_from_slice(&parameter.to_bytes()).unwrap();
-        data.try_extend_from_slice(&value.to_bytes()).unwrap();
+        data.try_extend_from_slice(&parameter.to_bytes())
+            .expect("BUG: Send data buffer too small.");
+        data.try_extend_from_slice(&value.to_bytes())
+            .expect("BUG: Send data buffer too small.");
         data.push(ETX);
         data.push(bcc(&data[6..]));
         SendData::new(data, ReceiveWriteResponse::new(self))
@@ -111,8 +114,8 @@ impl Master {
 
     /// Initiate a read command to a node.
     ///
-    /// The returned [SendData] struct holds the data that needs to be transmitted
-    /// on the bus. See also [write_parameter()](Self::write_parameter()).
+    /// The returned [`SendData`] struct holds the data that needs to be transmitted
+    /// on the bus. See also [`write_parameter()`](Self::write_parameter()).
     pub fn read_parameter(
         &mut self,
         address: Address,
@@ -131,7 +134,7 @@ impl Master {
     }
 
     /// Check if we can use the short "read-again" command form.
-    /// Consumes the self.read_again value
+    /// Consumes the `self.read_again` value
     fn try_read_again(&mut self, address: Address, parameter: Parameter) -> Option<u8> {
         let (old_addr, old_param) = self.read_again.take()?;
         if old_addr == address && self.get_node_capabilities(address).can_read_again {
@@ -150,18 +153,18 @@ impl Master {
         self.nodes[address.as_usize()] = NodeState { can_read_again };
     }
 
-    fn get_node_capabilities(&self, address: Address) -> NodeState {
+    const fn get_node_capabilities(&self, address: Address) -> NodeState {
         self.nodes[address.as_usize()]
     }
 }
 
 type SendDataStore = ArrayVec<u8, 20>;
 
-/// [SendData] holds data that should be transmitted to the nodes.
+/// `SendData` holds data that should be transmitted to the nodes.
 ///
-/// Call [data_sent()](Self::data_sent()) after the data has been
-/// successfully transmitted in order to transition to the "response
-/// receive" state. If data transmission fails this struct should be
+/// Call [`data_sent()`](Self::data_sent()) after the data has been
+/// successfully transmitted in order to transition to the "receive
+/// response" state. If data transmission fails this struct should be
 /// dropped in order to return to the idle state.
 #[derive(Debug)]
 pub struct SendData<'a, Rec: Receiver<Res>, Res> {
@@ -195,15 +198,15 @@ mod private {
     pub trait Receiver {}
 }
 
-/// Return value from Receiver::receive_data()
+/// Return value from `Receiver::receive_data()`
 /// Indicates if enough data has been received or if more data is needed.
-/// R is the receiver (Self), T is Self::Response
+/// R is the receiver (Self), T is `Self::Response`
 pub enum ReceiveDataProgress<R, T> {
     Done(T),
     NeedData(R),
 }
 
-/// Provides the receive_data() method for parsing response
+/// Provides the `receive_data()` method for parsing response
 /// data from the nodes.
 pub trait Receiver<Response>: Sized + private::Receiver {
     /// Receive and parse data from the bus.
@@ -215,7 +218,7 @@ pub trait Receiver<Response>: Sized + private::Receiver {
 
 type WriteResult = Result<(), Error>;
 
-/// Call [receive_data()](Receiver::receive_data()) to process the
+/// Call [`receive_data()`](Receiver::receive_data()) to process the
 /// received response data from the node.
 #[derive(Debug)]
 pub struct ReceiveWriteResponse<'a> {
@@ -289,7 +292,7 @@ impl Receiver<ReadResult> for ReceiveReadResponse<'_> {
 
         ReceiveDataProgress::Done(match parse_read_response(self.buffer.as_ref()) {
             ResponseToken::NeedData => return ReceiveDataProgress::NeedData(self),
-            ResponseToken::ReadOK { parameter, value } if (parameter == self.expected_param) => {
+            ResponseToken::ReadOk { parameter, value } if (parameter == self.expected_param) => {
                 self.master.read_again = Some((self.address, parameter));
                 ReadResult::Ok(value)
             }
@@ -382,16 +385,15 @@ pub mod io {
     where
         IO: std::io::Read + std::io::Write,
     {
-        pub fn new(io: IO) -> Master<IO> {
-            Master {
+        pub fn new(io: IO) -> Self {
+            Self {
                 proto: super::Master::new(),
                 stream: io,
             }
         }
 
-        pub fn set_can_read_again(&mut self, address: impl IntoAddress, value: bool) {
-            self.proto
-                .set_node_capabilities(address.into_address().unwrap(), value);
+        pub fn set_can_read_again(&mut self, address: Address, value: bool) {
+            self.proto.set_node_capabilities(address, value);
         }
 
         /// Sends a write command to the node.
@@ -404,6 +406,7 @@ pub mod io {
             let (address, parameter) = check_addr_param(address, parameter)?;
             let value = value
                 .into_value()
+                .ok()
                 .context(InvalidArgument { arg: "value" })?;
             let response = self
                 .proto
