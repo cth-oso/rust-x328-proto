@@ -9,7 +9,7 @@ pub mod master;
 pub mod node;
 
 pub use master::Master;
-pub use node::BusNode;
+pub use node::NodeState;
 pub use types::{
     Address, Error as TypeError, IntoAddress, IntoParameter, IntoValue, Parameter, Value,
 };

@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use x328_proto::master::io::Master;
-use x328_proto::BusNode;
+use x328_proto::NodeState;
 use x328_proto::{master, IntoAddress};
 
 use common::{BusInterface, RS422Bus};
@@ -30,14 +30,14 @@ fn master_main_loop(io: BusInterface) -> Result<(), master::io::Error> {
 }
 
 fn node_main_loop(mut serial: BusInterface) {
-    let mut node = BusNode::new(5).unwrap();
+    let mut node = NodeState::new(5).unwrap();
     'main: loop {
         if SHUTDOWN.load(SeqCst) {
             break 'main;
         };
 
         node = match node {
-            BusNode::ReceiveData(recv) => {
+            NodeState::ReceiveData(recv) => {
                 let mut buf = [0; 1];
                 if let Ok(len) = serial.read(&mut buf) {
                     if len == 0 {
@@ -49,12 +49,12 @@ fn node_main_loop(mut serial: BusInterface) {
                 }
             }
 
-            BusNode::SendData(mut send) => {
+            NodeState::SendData(mut send) => {
                 serial.write_all(send.get_data()).unwrap();
                 send.data_sent()
             }
 
-            BusNode::ReadParameter(read_command) => {
+            NodeState::ReadParameter(read_command) => {
                 if read_command.parameter() == 3 {
                     read_command.send_invalid_parameter()
                 } else {
@@ -62,7 +62,7 @@ fn node_main_loop(mut serial: BusInterface) {
                 }
             }
 
-            BusNode::WriteParameter(write_command) => write_command.write_ok(),
+            NodeState::WriteParameter(write_command) => write_command.write_ok(),
         };
     }
 }
