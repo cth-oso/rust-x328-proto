@@ -104,6 +104,30 @@ impl NodeState {
     }
 }
 
+impl From<ReceiveData> for NodeState {
+    fn from(x: ReceiveData) -> Self {
+        Self::ReceiveData(x)
+    }
+}
+
+impl From<SendData> for NodeState {
+    fn from(x: SendData) -> Self {
+        Self::SendData(x)
+    }
+}
+
+impl From<ReadParam> for NodeState {
+    fn from(x: ReadParam) -> Self {
+        Self::ReadParameter(x)
+    }
+}
+
+impl From<WriteParam> for NodeState {
+    fn from(x: WriteParam) -> Self {
+        Self::WriteParameter(x)
+    }
+}
+
 type CommonState = Box<CommonStateStruct>;
 
 #[derive(Debug)]
@@ -121,20 +145,22 @@ pub struct ReceiveData {
 
 impl ReceiveData {
     fn create(address: Address) -> NodeState {
-        NodeState::ReceiveData(Self {
+        Self {
             state: Box::new(CommonStateStruct {
                 address,
                 read_again_param: None,
             }),
             input_buffer: Buffer::new(),
-        })
+        }
+        .into()
     }
 
     fn from_state(state: CommonState) -> NodeState {
-        NodeState::ReceiveData(Self {
+        Self {
             state,
             input_buffer: Buffer::new(),
-        })
+        }
+        .into()
     }
 
     /// Feed data into the internal buffer, and try to parse the buffer afterwards.
@@ -185,8 +211,8 @@ impl ReceiveData {
         }
     }
 
-    const fn need_data(self) -> NodeState {
-        NodeState::ReceiveData(self)
+    fn need_data(self) -> NodeState {
+        self.into()
     }
 
     fn send_nak(self) -> NodeState {
@@ -213,13 +239,13 @@ pub struct SendData {
 
 impl SendData {
     fn from_state(state: CommonState, data: SendDataStore) -> NodeState {
-        NodeState::SendData(Self { state, data })
+        Self { state, data }.into()
     }
 
     fn from_byte(state: CommonState, byte: u8) -> NodeState {
         let mut data = ArrayVec::new();
         data.push(byte);
-        NodeState::SendData(Self { state, data })
+        Self { state, data }.into()
     }
 
     /// Returns the data to be sent on the bus.
@@ -244,11 +270,12 @@ pub struct ReadParam {
 
 impl ReadParam {
     fn from_state(state: CommonState, address: Address, parameter: Parameter) -> NodeState {
-        NodeState::ReadParameter(Self {
+        Self {
             state,
             address,
             parameter,
-        })
+        }
+        .into()
     }
 
     /// Send a response to the master with the value of
@@ -312,12 +339,13 @@ impl WriteParam {
         parameter: Parameter,
         value: Value,
     ) -> NodeState {
-        NodeState::WriteParameter(Self {
+        Self {
             state,
             address,
             parameter,
             value,
-        })
+        }
+        .into()
     }
 
     /// Inform the master that the parameter value was successfully updated.
