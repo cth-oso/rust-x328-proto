@@ -206,7 +206,7 @@ type SendDataStore = ArrayVec<u8, 13>;
 
 /// Struct with methods for the "transmit data on bus" state.
 ///
-/// Call [`send_data()`](Self::send_data()) to get a reference to the data to be transmitted,
+/// Call [`get_data()`](Self::get_data()) to get a reference to the data to be transmitted,
 /// and then call [`data_sent()`](Self::data_sent()) when the data has been successfully transmitted.
 #[derive(Debug)]
 pub struct SendData {

@@ -3,6 +3,7 @@
 //! X3.28 is an old field bus protocol, commonly used on top of a RS-422 bus.
 //! The bus settings should be 9600 baud, 7 bit char, no flow control, even parity, 1 stop bit (7E1).
 //! Since this crate doesn't provide IO at all, feel free to use whatever transport you want.
+#![deny(missing_docs)]
 
 pub mod master;
 pub mod node;

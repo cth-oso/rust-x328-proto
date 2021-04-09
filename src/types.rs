@@ -1,19 +1,23 @@
-use snafu::{ensure, Backtrace, OptionExt, Snafu};
+use snafu::{ensure, OptionExt, Snafu};
 
 use arrayvec::ArrayVec;
 use std::convert::{TryFrom, TryInto};
 use std::ops::{Deref, RangeInclusive};
 use std::str::FromStr;
 
+/// Error type for this module
 #[derive(Debug, Snafu)]
 #[non_exhaustive]
 pub enum Error {
+    /// The value isn't a valid X3.28 node address.
     #[snafu(display("Invalid address"))]
-    InvalidAddress { backtrace: Backtrace },
+    InvalidAddress,
+    /// The value isn't a valid X3.28 parameter.
     #[snafu(display("Invalid parameter"))]
-    InvalidParameter { backtrace: Backtrace },
+    InvalidParameter,
+    /// The value isn't a valid X3.28 value.
     #[snafu(display("Invalid value"))]
-    InvalidValue { backtrace: Backtrace },
+    InvalidValue,
 }
 
 const fn invalid_address() -> InvalidAddress {
@@ -42,8 +46,11 @@ const fn invalid_value() -> InvalidValue {
 pub struct Address(u8);
 
 impl Address {
-    /// Create a new address, checking that the address is in \[0,99\].
-    pub fn new(address: u8) -> Result<Self, Error> {
+    /// Create a new address, checking that the address is in \[0, 99\].
+    /// # Errors
+    /// Returns [`Error::InvalidAddress`] if `address` is out of range.
+    pub fn new(address: impl TryInto<u8>) -> Result<Self, Error> {
+        let address = address.try_into().ok().with_context(invalid_address)?;
         ensure!(address <= 99, invalid_address());
         Ok(Self(address))
     }
@@ -55,10 +62,6 @@ impl Address {
         buf[2] = 0x30 + self.0 % 10;
         buf[3] = buf[2];
         buf
-    }
-
-    pub const fn as_usize(self) -> usize {
-        self.0 as usize
     }
 }
 
@@ -76,7 +79,11 @@ impl PartialEq<usize> for Address {
     }
 }
 
-pub trait IntoAddress: TryInto<Address> {
+/// Trait to convert `T: TryInto<u8>` into an [`Address`].
+pub trait IntoAddress {
+    /// Convert self to an Address.
+    /// # Errors
+    /// Returns `Error:InvalidAddress` if self isn't a valid address.
     fn into_address(self) -> Result<Address, Error>;
 }
 
@@ -88,10 +95,10 @@ impl IntoAddress for Address {
 
 impl<T> IntoAddress for T
 where
-    T: TryInto<Address> + ToString + Clone,
+    T: TryInto<u8>,
 {
     fn into_address(self) -> Result<Address, Error> {
-        self.try_into().ok().with_context(invalid_address)
+        Address::new(self)
     }
 }
 
@@ -99,8 +106,7 @@ impl TryFrom<usize> for Address {
     type Error = Error;
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
-        ensure!(value <= 99, invalid_address());
-        Self::new(value as u8)
+        Self::new(value)
     }
 }
 
@@ -110,20 +116,55 @@ impl FromStr for Address {
     /// This is meant to be used for parsing the on-wire format
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         ensure!(s.len() == 2, invalid_address());
-        Self::new(s.parse().ok().with_context(invalid_address)?)
+        Self::new(s.parse::<u8>().ok().with_context(invalid_address)?)
     }
 }
 
-/// Parameter is a range-checked \[0,9999\] integer, representing a node parameter.
+#[cfg(test)]
+mod address_tests {
+    use super::Address;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_valid_addresses() {
+        for n in 0..=99 {
+            let a = Address::new(n).unwrap();
+            assert_eq!(*a, n);
+            let bytes = a.to_bytes();
+            assert_eq!(bytes[0], bytes[1]);
+            assert_eq!(bytes[2], bytes[3]);
+            let s = std::str::from_utf8(&bytes[1..=2]).unwrap();
+            assert_eq!(Address::from_str(s).unwrap(), a);
+            assert_eq!(s.parse::<u8>().unwrap(), n);
+        }
+    }
+
+    #[test]
+    fn test_address() {
+        let a05 = Address::new(5).unwrap();
+        assert_eq!(&a05.to_bytes(), b"0055");
+
+        assert_eq!("05".parse::<Address>().unwrap(), Address(5));
+        assert_eq!("13".parse::<Address>().unwrap(), 13);
+        assert!("1".parse::<Address>().is_err());
+        assert!("100".parse::<Address>().is_err());
+    }
+}
+
+/// `Parameter` is a range-checked \[0, 9999\] integer, representing a register
+/// in a node.
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone, Hash)]
 #[repr(transparent)]
 pub struct Parameter(i16);
 pub(crate) type ParameterOffset = i16;
 
 impl Parameter {
-    /// Create a new Parameter, checking that the given value
+    /// Create a new `Parameter`, checking that the given value
     /// is in the range [0, 9999].
-    pub fn new(parameter: i16) -> Result<Self, Error> {
+    /// # Errors
+    /// Returns [`Error::InvalidParameter`] if `parameter` is out of range.
+    pub fn new(parameter: impl TryInto<i16>) -> Result<Self, Error> {
+        let parameter = parameter.try_into().ok().with_context(invalid_parameter)?;
         ensure!((0..=9999).contains(&parameter), invalid_parameter());
         Ok(Self(parameter))
     }
@@ -157,7 +198,11 @@ impl PartialEq<usize> for Parameter {
     }
 }
 
+/// Trait to convert `T: TryInto<i16>` into a [`Parameter`].
 pub trait IntoParameter {
+    /// Convert `self` to `Parameter`.
+    /// # Errors
+    /// Returns [`Error::InvalidParameter`] if `self` can't be converted.
     fn into_parameter(self) -> Result<Parameter, Error>;
 }
 
@@ -169,10 +214,10 @@ impl IntoParameter for Parameter {
 
 impl<T> IntoParameter for T
 where
-    T: TryInto<i16> + ToString + Clone,
+    T: TryInto<i16>,
 {
     fn into_parameter(self) -> Result<Parameter, Error> {
-        Parameter::new(self.try_into().ok().with_context(invalid_parameter)?)
+        Parameter::new(self)
     }
 }
 
@@ -180,8 +225,7 @@ impl TryFrom<usize> for Parameter {
     type Error = Error;
 
     fn try_from(value: usize) -> Result<Self, Self::Error> {
-        ensure!(value <= 9999, invalid_parameter());
-        Self::new(value as i16)
+        Self::new(value)
     }
 }
 
@@ -191,7 +235,7 @@ impl FromStr for Parameter {
     /// This is meant to be used for parsing the on-wire format
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         ensure!(s.len() == 4, invalid_parameter());
-        Self::new(s.parse().ok().with_context(invalid_parameter)?)
+        Self::new(s.parse::<u16>().ok().with_context(invalid_parameter)?)
     }
 }
 
@@ -202,35 +246,18 @@ impl TryFrom<&[u8]> for Parameter {
         std::str::from_utf8(value)
             .ok()
             .with_context(invalid_parameter)
-            .and_then(|s| Parameter::from_str(s))
+            .and_then(|s| Self::from_str(s))
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{Address, Parameter};
+mod parameter_tests {
+    use super::Parameter;
 
     macro_rules! assert_ok {
         ($res:expr, $ok:expr) => {
             assert_eq!($res.unwrap(), $ok)
         };
-    }
-
-    #[test]
-    fn test_address() {
-        let a87 = Address::new(87).unwrap();
-        assert_eq!(a87, 87);
-
-        let bytes = &a87.to_bytes();
-        assert_eq!(bytes, b"8877");
-
-        let a05 = Address::new(5).unwrap();
-        assert_eq!(&a05.to_bytes(), b"0055");
-
-        assert_eq!("05".parse::<Address>().unwrap(), Address(5));
-        assert_eq!("13".parse::<Address>().unwrap(), 13);
-        assert!("1".parse::<Address>().is_err());
-        assert!("100".parse::<Address>().is_err());
     }
 
     #[test]
@@ -284,11 +311,14 @@ const VAL_RANGE: RangeInclusive<i32> = -99_999..=999_999;
 const VAL_MIN_NORM: i32 = -9999;
 
 impl Value {
-    /// Try to create a Value from the given i32 integer. Returns None if the
-    /// the given integer is out of range.
-    pub fn try_from_i32(value: i32) -> Option<Self> {
+    /// Create a new `Value`, checking that the given `value` can be represented
+    /// in the on-wire format.
+    /// # Errors
+    /// Returns [`Error::InvalidValue`] if `value` is out of range.
+    pub fn new(value: impl TryInto<i32>) -> Result<Self, Error> {
+        let value: i32 = value.try_into().ok().with_context(invalid_value)?;
         if !VAL_RANGE.contains(&value) {
-            return None;
+            return invalid_value().fail();
         }
         let fmt = {
             if value < VAL_MIN_NORM {
@@ -297,31 +327,26 @@ impl Value {
                 ValueFormat::Normal
             }
         };
-        Some(Self(value, fmt))
+        Ok(Self(value, fmt))
     }
 
-    /// Returns the contained value as u16 if it can be converted to u16 without truncation.
-    pub fn try_u16(self) -> Option<u16> {
+    /// Returns the contained value as u16 if it can be converted without truncation.
+    pub fn try_into_u16(self) -> Option<u16> {
         u16::try_from(self.0).ok()
     }
 
     /// Format the value into the on-wire representation.
     pub(crate) fn to_bytes(self) -> ValueBytes {
-        let (positive, mut val) = if self.0 >= 0 {
-            (true, self.0)
-        } else {
-            (false, -self.0)
-        };
-
+        let mut val = self.0.abs();
         let mut buf = ValueBytes::new();
         loop {
-            buf.push(b'0' + (val % 10) as u8); // panics on overflow
+            buf.push(b'0' + (val % 10) as u8); // push panics on overflow
             val /= 10;
             if val == 0 && (self.1 == ValueFormat::Normal || buf.len() == 5) {
                 break;
             }
         }
-        if !positive {
+        if self.0.is_negative() {
             buf.push(b'-');
         } else if !buf.is_full() {
             buf.push(b'+');
@@ -331,7 +356,11 @@ impl Value {
     }
 }
 
+/// Trait to convert `T: Into<i32>` into a [`Value`].
 pub trait IntoValue {
+    /// Try to convert self to a `Value`
+    /// # Errors
+    /// Returns [`Error::InvalidValue`] if self isn't a valid address.
     fn into_value(self) -> Result<Value, Error>;
 }
 
@@ -343,21 +372,10 @@ impl IntoValue for Value {
 
 impl<T> IntoValue for T
 where
-    T: Into<i32>,
+    T: TryInto<i32>,
 {
     fn into_value(self) -> Result<Value, Error> {
-        let value = self.into();
-        if !VAL_RANGE.contains(&value) {
-            return invalid_value().fail();
-        }
-        let fmt = {
-            if value < VAL_MIN_NORM {
-                ValueFormat::Wide
-            } else {
-                ValueFormat::Normal
-            }
-        };
-        Ok(Value(value, fmt))
+        Value::new(self)
     }
 }
 
@@ -365,7 +383,7 @@ impl TryFrom<i32> for Value {
     type Error = Error;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
-        Self::try_from_i32(value).with_context(invalid_value)
+        Self::new(value)
     }
 }
 
@@ -438,15 +456,15 @@ mod value_tests {
 
     #[test]
     fn test_valid_values() {
-        for n in -99999..=999_999 {
-            let v = Value::try_from_i32(n).expect("OK value");
-            assert_eq!(*v, n);
-            let b = v.to_bytes();
-            let s = std::str::from_utf8(b.as_ref()).unwrap();
-            assert_eq!(s.parse::<Value>().unwrap(), v);
-            let from_u8: Value = b.as_ref().try_into().unwrap();
-            assert_eq!(from_u8, v);
-            assert_eq!(s.parse::<i32>().unwrap(), *v);
+        for n in -99_999..=999_999 {
+            let v = Value::new(n).expect("Valid value");
+            assert_eq!(*v, n, "Value derefs to original integer {}", n);
+            let b = &v.to_bytes();
+            let s = std::str::from_utf8(b).expect("Parsing on-wire format as &str -> Value");
+            assert_eq!(s.parse::<Value>().unwrap(), v, "&str format-parse, {}", n);
+            let from_u8: Value = b.as_ref().try_into().expect("convert from &[u8]");
+            assert_eq!(from_u8, v, "the &[u8] -> Value conversion is ok");
+            assert_eq!(s.parse::<i32>().unwrap(), *v, "on-wire format as int");
         }
     }
 }
