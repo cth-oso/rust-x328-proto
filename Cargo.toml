@@ -1,10 +1,16 @@
 [package]
 name = "x328-proto"
 version = "0.1.0"
+license = "MIT OR Apache-2.0"
 authors = ["Lukas Sandström <lukas.sandstrom@chalmers.se>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "Sans-io implementation of the X3.28 field bus protocol."
+documentation = "https://docs.rs/x328-proto/"
+repository = "https://github.com/cth-oso/rust-x328-proto"
+
+keywords = ["x3.28", "protocol", "sans-io"]
+categories = ["encoding", "network-programming", "parser-implementations"]
 
 [dependencies]
 arrayvec = { version = "0.7", default-features=false }

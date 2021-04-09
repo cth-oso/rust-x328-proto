@@ -264,7 +264,7 @@ pub enum Error {
     #[snafu(display("Node responded EOT to command."))]
     InvalidParameter,
     /// `NAK` response from node, indicating that the command
-    /// couldn't be processed succesfully.
+    /// couldn't be processed successfully.
     #[snafu(display("Node responded NAK to command."))]
     CommandFailed,
     /// Invalid data received from node, or some other protocol
@@ -274,7 +274,7 @@ pub enum Error {
 }
 
 /// This struct implements the `Receiver` trait to receive and process
-/// the reponse to a read command.
+/// the response to a read command.
 #[derive(Debug)]
 pub struct ReceiveReadResponse<'a> {
     master: &'a mut Master,
