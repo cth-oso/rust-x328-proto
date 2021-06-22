@@ -89,7 +89,7 @@ impl NodeState {
     /// let mut node: NodeState = NodeState::new(10).unwrap(); // new protocol instance with address 10
     /// ```
     pub fn new(address: impl IntoAddress) -> Result<Self, TypeError> {
-        Ok(ReceiveData::create(address.into_address()?))
+        Ok(ReceiveData::new(address)?.into())
     }
 
     /// Do not send any reply to the master. Transition to the idle `ReceiveData` state instead.
@@ -144,15 +144,15 @@ pub struct ReceiveData {
 }
 
 impl ReceiveData {
-    fn create(address: Address) -> NodeState {
-        Self {
+    /// Create a new bus node instance in the "receive" state without the `NodeState` wrapper.
+    pub fn new(address: impl IntoAddress) -> Result<Self, TypeError> {
+        Ok(Self {
             state: Box::new(CommonStateStruct {
-                address,
+                address: address.into_address()?,
                 read_again_param: None,
             }),
             input_buffer: Buffer::new(),
-        }
-        .into()
+        })
     }
 
     fn from_state(state: CommonState) -> NodeState {
