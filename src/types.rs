@@ -156,7 +156,6 @@ mod address_tests {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone, Hash)]
 #[repr(transparent)]
 pub struct Parameter(i16);
-pub(crate) type ParameterOffset = i16;
 
 impl Parameter {
     /// Create a new `Parameter`, checking that the given value
@@ -169,10 +168,6 @@ impl Parameter {
         Ok(Self(parameter))
     }
 
-    pub(crate) fn checked_add(self, offset: ParameterOffset) -> Result<Self, Error> {
-        Self::new(self.0.checked_add(offset).with_context(invalid_parameter)?)
-    }
-
     pub(crate) fn to_bytes(self) -> [u8; 4] {
         let mut buf = [0; 4];
         let mut x = self.0;
@@ -181,6 +176,24 @@ impl Parameter {
             x /= 10;
         }
         buf
+    }
+
+    /// Returns the next higher numbered parameter, or None if the current value is at max.
+    pub fn next(self) -> Option<Self> {
+        if self.0 < 9999 {
+            Some(Self(self.0 + 1))
+        } else {
+            None
+        }
+    }
+
+    /// Returns the next lowered numbered parameter, or None if the current value is zero.
+    pub fn prev(self) -> Option<Self> {
+        if self.0 > 0 {
+            Some(Self(self.0 - 1))
+        } else {
+            None
+        }
     }
 }
 
@@ -266,12 +279,6 @@ mod parameter_tests {
 
         let p10 = Parameter::new(10).unwrap();
         assert_eq!(p10, 10); // usize comparison
-        assert_ok!(p10.checked_add(10), Parameter(20));
-        assert_ok!(p10.checked_add(-10), Parameter(0));
-        assert!(p10.checked_add(-20).is_err());
-
-        assert!(Parameter(9999).checked_add(1).is_err());
-        assert!(Parameter(9999).checked_add(32000).is_err());
 
         let str = &p10.to_bytes();
         assert_eq!(str, b"0010");
@@ -281,6 +288,19 @@ mod parameter_tests {
         assert!("10".parse::<Parameter>().is_err());
         assert!("-100".parse::<Parameter>().is_err());
         assert!("00010".parse::<Parameter>().is_err());
+    }
+
+    #[test]
+    fn test_parameter_next_prev() {
+        let p0 = Parameter(0);
+        assert_eq!(p0.prev(), None);
+        assert_eq!(p0.next(), Some(Parameter(1)));
+        let p10 = Parameter(10);
+        assert_eq!(p10.prev(), Some(Parameter(9)));
+        assert_eq!(p10.next(), Some(Parameter(11)));
+        let p9999 = Parameter(9999);
+        assert_eq!(p9999.prev(), Some(Parameter(9998)));
+        assert_eq!(p9999.next(), None);
     }
 
     #[test]

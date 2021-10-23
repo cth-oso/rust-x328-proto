@@ -7,7 +7,7 @@ use nom::Err::Incomplete;
 use nom::IResult;
 
 use crate::ascii::*;
-use crate::types::{Address, Parameter, ParameterOffset, Value};
+use crate::types::{Address, Parameter, Value};
 use std::convert::TryInto;
 
 type Char = u8;
@@ -61,7 +61,9 @@ pub mod node {
     pub enum CommandToken {
         WriteParameter(Address, Parameter, Value),
         ReadParameter(Address, Parameter),
-        ReadAgain(ParameterOffset),
+        ReadPrevious,
+        ReadAgain,
+        ReadNext,
         InvalidPayload(Address),
         NeedData,
     }
@@ -101,9 +103,9 @@ pub mod node {
 
     fn read_again(buf: &Buf) -> IResult<&Buf, CommandToken> {
         alt((
-            value(ReadAgain(1), ascii_char(ACK)),
-            value(ReadAgain(0), ascii_char(NAK)),
-            value(ReadAgain(-1), ascii_char(BS)),
+            value(ReadNext, ascii_char(ACK)),
+            value(ReadAgain, ascii_char(NAK)),
+            value(ReadPrevious, ascii_char(BS)),
         ))(buf)
     }
 
@@ -149,9 +151,9 @@ pub mod node {
             buf.write(b"0");
             assert_eq!(parse_command(buf.as_ref()), (1, NeedData));
 
-            assert_eq!(parse_command(b"\x15"), (1, ReadAgain(0)));
-            assert_eq!(parse_command(b"\x08"), (1, ReadAgain(-1)));
-            assert_eq!(parse_command(b"\x06"), (1, ReadAgain(1)));
+            assert_eq!(parse_command(b"\x15"), (1, ReadAgain));
+            assert_eq!(parse_command(b"\x08"), (1, ReadPrevious));
+            assert_eq!(parse_command(b"\x06"), (1, ReadNext));
         }
 
         #[test]

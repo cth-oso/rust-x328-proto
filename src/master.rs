@@ -506,7 +506,7 @@ mod tests {
         let mut idle = Master::new();
         idle.read_again_enable(addr, true);
         idle.read_again = Some((addr, param));
-        let send = idle.read_parameter(addr, param.checked_add(1).unwrap());
+        let send = idle.read_parameter(addr, param.next().unwrap());
         assert_eq!(send.get_data(), [ACK]);
     }
 }

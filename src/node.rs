@@ -173,7 +173,9 @@ impl ReceiveData {
     }
 
     fn parse_buffer(mut self) -> NodeState {
-        use CommandToken::{InvalidPayload, ReadAgain, ReadParameter, WriteParameter};
+        use CommandToken::{
+            InvalidPayload, ReadAgain, ReadNext, ReadParameter, ReadPrevious, WriteParameter,
+        };
 
         let (token, read_again_param) = loop {
             match parse_command(self.input_buffer.as_ref()) {
@@ -199,11 +201,15 @@ impl ReceiveData {
             WriteParameter(address, parameter, value) if self.for_us(address) => {
                 WriteParam::from_state(self.state, address, parameter, value)
             }
-            ReadAgain(offset) if read_again_param.is_some() => {
-                if let Ok(next_param) = read_again_param.unwrap().1.checked_add(offset) {
-                    ReadParam::from_state(self.state, read_again_param.unwrap().0, next_param)
-                } else {
-                    SendData::from_byte(self.state, EOT)
+            ReadAgain | ReadNext | ReadPrevious if read_again_param.is_some() => {
+                let (addr, last_param) = read_again_param.unwrap();
+                match match token {
+                    CommandToken::ReadPrevious => last_param.prev(),
+                    CommandToken::ReadNext => last_param.next(),
+                    _ => Some(last_param),
+                } {
+                    Some(param) => ReadParam::from_state(self.state, addr, param),
+                    None => SendData::from_byte(self.state, EOT),
                 }
             }
             InvalidPayload(address) if address == self.state.address => self.send_nak(),
