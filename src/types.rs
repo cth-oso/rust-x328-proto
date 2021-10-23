@@ -1,25 +1,37 @@
 //! This module defines range-checked types for X3.28 addresses, parameters
 //! and values, meant to simplify correct usage of the API.
 
-use thiserror::Error;
+use snafu::{ensure, OptionExt, Snafu};
 
 use arrayvec::ArrayVec;
 use std::convert::{TryFrom, TryInto};
 use std::ops::{Deref, RangeInclusive};
 
 /// Error type for this module
-#[derive(Debug, Error)]
+#[derive(Debug, Snafu)]
 #[non_exhaustive]
 pub enum Error {
     /// The value isn't a valid X3.28 node address.
-    #[error("Invalid address")]
+    #[snafu(display("Invalid address"))]
     InvalidAddress,
     /// The value isn't a valid X3.28 parameter.
-    #[error("Invalid parameter")]
+    #[snafu(display("Invalid parameter"))]
     InvalidParameter,
     /// The value isn't a valid X3.28 value.
-    #[error("Invalid value")]
+    #[snafu(display("Invalid value"))]
     InvalidValue,
+}
+
+const fn invalid_address() -> InvalidAddress {
+    InvalidAddress {}
+}
+
+const fn invalid_parameter() -> InvalidParameter {
+    InvalidParameter {}
+}
+
+const fn invalid_value() -> InvalidValue {
+    InvalidValue {}
 }
 
 /// Address is a range-checked [0, 99] integer, representing a node address.
@@ -48,16 +60,8 @@ impl Address {
     /// # Errors
     /// Returns [`Error::InvalidAddress`] if `address` is out of range.
     pub fn new(address: impl TryInto<u8>) -> Result<Self, Error> {
-        let address = address
-            .try_into()
-            .map_err(|_| Error::InvalidAddress)
-            .and_then(|addr| {
-                if (0u8..100).contains(&addr) {
-                    Ok(addr)
-                } else {
-                    Err(Error::InvalidAddress)
-                }
-            })?;
+        let address = address.try_into().ok().with_context(invalid_address)?;
+        ensure!(address <= 99, invalid_address());
         Ok(Self(address))
     }
 
@@ -162,12 +166,9 @@ impl Parameter {
     /// # Errors
     /// Returns [`Error::InvalidParameter`] if `parameter` is out of range.
     pub fn new(parameter: impl TryInto<i16>) -> Result<Self, Error> {
-        let parameter = parameter.try_into().map_err(|_| Error::InvalidParameter)?;
-        if (0..=9999).contains(&parameter) {
-            Ok(Self(parameter))
-        } else {
-            Err(Error::InvalidParameter)
-        }
+        let parameter = parameter.try_into().ok().with_context(invalid_parameter)?;
+        ensure!((0..=9999).contains(&parameter), invalid_parameter());
+        Ok(Self(parameter))
     }
 
     pub(crate) fn to_bytes(self) -> [u8; 4] {
@@ -321,9 +322,9 @@ impl Value {
     /// # Errors
     /// Returns [`Error::InvalidValue`] if `value` is out of range.
     pub fn new(value: impl TryInto<i32>) -> Result<Self, Error> {
-        let value: i32 = value.try_into().map_err(|_| Error::InvalidValue)?;
+        let value: i32 = value.try_into().ok().with_context(invalid_value)?;
         if !VAL_RANGE.contains(&value) {
-            return Err(Error::InvalidValue);
+            return invalid_value().fail();
         }
         let fmt = {
             if value < VAL_MIN_NORM {
@@ -338,7 +339,7 @@ impl Value {
     /// Create a new Value, specifying the on-wire format mode, normal or wide.
     pub fn new_fmt(value: i32, format: ValueFormat) -> Result<Self, Error> {
         if !VAL_RANGE.contains(&value) || format == ValueFormat::Normal && value < VAL_MIN_NORM {
-            return Err(Error::InvalidValue);
+            return invalid_value().fail();
         }
         Ok(Self(value, format))
     }
