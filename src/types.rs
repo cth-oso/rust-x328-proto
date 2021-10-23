@@ -110,20 +110,9 @@ impl TryFrom<usize> for Address {
     }
 }
 
-impl FromStr for Address {
-    type Err = Error;
-
-    /// This is meant to be used for parsing the on-wire format
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        ensure!(s.len() == 2, invalid_address());
-        Self::new(s.parse::<u8>().ok().with_context(invalid_address)?)
-    }
-}
-
 #[cfg(test)]
 mod address_tests {
     use super::Address;
-    use std::str::FromStr;
 
     #[test]
     fn test_valid_addresses() {
@@ -133,9 +122,6 @@ mod address_tests {
             let bytes = a.to_bytes();
             assert_eq!(bytes[0], bytes[1]);
             assert_eq!(bytes[2], bytes[3]);
-            let s = std::str::from_utf8(&bytes[1..=2]).unwrap();
-            assert_eq!(Address::from_str(s).unwrap(), a);
-            assert_eq!(s.parse::<u8>().unwrap(), n);
         }
     }
 
@@ -144,10 +130,8 @@ mod address_tests {
         let a05 = Address::new(5).unwrap();
         assert_eq!(&a05.to_bytes(), b"0055");
 
-        assert_eq!("05".parse::<Address>().unwrap(), Address(5));
-        assert_eq!("13".parse::<Address>().unwrap(), 13);
-        assert!("1".parse::<Address>().is_err());
-        assert!("100".parse::<Address>().is_err());
+        assert!(Address::new(100).is_err());
+        assert!(Address::new(-1).is_err());
     }
 }
 
