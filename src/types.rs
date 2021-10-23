@@ -226,36 +226,9 @@ impl TryFrom<usize> for Parameter {
     }
 }
 
-impl FromStr for Parameter {
-    type Err = Error;
-
-    /// This is meant to be used for parsing the on-wire format
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        ensure!(s.len() == 4, invalid_parameter());
-        Self::new(s.parse::<u16>().ok().with_context(invalid_parameter)?)
-    }
-}
-
-impl TryFrom<&[u8]> for Parameter {
-    type Error = Error;
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        std::str::from_utf8(value)
-            .ok()
-            .with_context(invalid_parameter)
-            .and_then(|s| Self::from_str(s))
-    }
-}
-
 #[cfg(test)]
 mod parameter_tests {
     use super::Parameter;
-
-    macro_rules! assert_ok {
-        ($res:expr, $ok:expr) => {
-            assert_eq!($res.unwrap(), $ok)
-        };
-    }
 
     #[test]
     fn test_parameter() {
@@ -266,12 +239,6 @@ mod parameter_tests {
 
         let str = &p10.to_bytes();
         assert_eq!(str, b"0010");
-
-        assert_ok!("0010".parse::<Parameter>(), p10);
-        assert_ok!("0100".parse::<Parameter>(), Parameter(100));
-        assert!("10".parse::<Parameter>().is_err());
-        assert!("-100".parse::<Parameter>().is_err());
-        assert!("00010".parse::<Parameter>().is_err());
     }
 
     #[test]

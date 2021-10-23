@@ -1,6 +1,7 @@
 use nom::branch::alt;
 use nom::bytes::streaming::take_while_m_n;
-use nom::combinator::{consumed, map, map_res, opt, value, verify};
+use nom::character::complete::u16;
+use nom::combinator::{consumed, map, map_parser, map_res, opt, value, verify};
 use nom::number::streaming::u8;
 use nom::sequence::{preceded, terminated, tuple};
 use nom::Err::Incomplete;
@@ -8,6 +9,7 @@ use nom::IResult;
 
 use crate::ascii::*;
 use crate::types::{Address, Parameter, Value};
+use crate::IntoParameter;
 use std::convert::TryInto;
 
 type Char = u8;
@@ -211,8 +213,8 @@ pub mod node {
 
 fn parameter(buf: &Buf) -> IResult<&Buf, Parameter> {
     map_res(
-        take_while_m_n(4, 4, |c: Char| c.is_ascii_digit()),
-        |b: &Buf| b.try_into(),
+        map_parser(take_while_m_n(4, 4, |c: Char| c.is_ascii_digit()), u16),
+        |param| param.into_parameter(),
     )(buf)
 }
 
@@ -239,6 +241,24 @@ fn ascii_char<'a>(ascii_char: u8) -> impl Fn(&'a Buf) -> IResult<&'a Buf, char> 
 
 fn bcc(s: &Buf) -> u8 {
     crate::bcc(s)
+}
+
+#[cfg(test)]
+mod test_internal {
+    use super::parameter;
+    use crate::IntoParameter;
+
+    #[test]
+    fn parse_parameter() {
+        assert_eq!(
+            parameter(b"0123").unwrap(),
+            (b"".as_ref(), 123.into_parameter().unwrap())
+        );
+
+        assert!(parameter(b"10").is_err());
+        assert!(parameter(b"-100").is_err());
+        assert!(parameter(b"0100").is_ok());
+    }
 }
 
 #[cfg(test)]
