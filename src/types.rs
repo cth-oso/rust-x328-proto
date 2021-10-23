@@ -3,7 +3,6 @@ use snafu::{ensure, OptionExt, Snafu};
 use arrayvec::ArrayVec;
 use std::convert::{TryFrom, TryInto};
 use std::ops::{Deref, RangeInclusive};
-use std::str::FromStr;
 
 /// Error type for this module
 #[derive(Debug, Snafu)]
@@ -301,6 +300,14 @@ impl Value {
         Ok(Self(value, fmt))
     }
 
+    /// Create a new Value, specifying the on-wire format mode, normal or wide.
+    pub fn new_fmt(value: i32, format: ValueFormat) -> Result<Self, Error> {
+        if !VAL_RANGE.contains(&value) || format == ValueFormat::Normal && value < VAL_MIN_NORM {
+            return invalid_value().fail();
+        }
+        Ok(Self(value, format))
+    }
+
     /// Returns the contained value as u16 if it can be converted without truncation.
     pub fn try_into_u16(self) -> Option<u16> {
         u16::try_from(self.0).ok()
@@ -376,30 +383,6 @@ impl From<i16> for Value {
     }
 }
 
-impl FromStr for Value {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let fmt = match s.len() {
-            1..=5 => ValueFormat::Normal,
-            6 => ValueFormat::Wide,
-            _ => return invalid_value().fail(),
-        };
-        Ok(Self(s.parse().ok().with_context(invalid_value)?, fmt))
-    }
-}
-
-impl TryFrom<&[u8]> for Value {
-    type Error = Error;
-
-    fn try_from(value: &[u8]) -> Result<Self, Self::Error> {
-        let s = std::str::from_utf8(value)
-            .ok()
-            .with_context(invalid_value)?;
-        Self::from_str(s)
-    }
-}
-
 impl PartialEq for Value {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
@@ -417,25 +400,5 @@ impl Deref for Value {
 
     fn deref(&self) -> &Self::Target {
         &self.0
-    }
-}
-
-#[cfg(test)]
-mod value_tests {
-    use crate::Value;
-    use std::convert::TryInto;
-
-    #[test]
-    fn test_valid_values() {
-        for n in -99_999..=999_999 {
-            let v = Value::new(n).expect("Valid value");
-            assert_eq!(*v, n, "Value derefs to original integer {}", n);
-            let b = &v.to_bytes();
-            let s = std::str::from_utf8(b).expect("Parsing on-wire format as &str -> Value");
-            assert_eq!(s.parse::<Value>().unwrap(), v, "&str format-parse, {}", n);
-            let from_u8: Value = b.as_ref().try_into().expect("convert from &[u8]");
-            assert_eq!(from_u8, v, "the &[u8] -> Value conversion is ok");
-            assert_eq!(s.parse::<i32>().unwrap(), *v, "on-wire format as int");
-        }
     }
 }

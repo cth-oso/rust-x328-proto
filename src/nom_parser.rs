@@ -1,6 +1,6 @@
 use nom::branch::alt;
 use nom::bytes::streaming::take_while_m_n;
-use nom::character::complete::u16;
+use nom::character::complete::{i32, u16};
 use nom::combinator::{consumed, map, map_parser, map_res, opt, value, verify};
 use nom::number::streaming::u8;
 use nom::sequence::{preceded, terminated, tuple};
@@ -8,9 +8,8 @@ use nom::Err::Incomplete;
 use nom::IResult;
 
 use crate::ascii::*;
-use crate::types::{Address, Parameter, Value};
+use crate::types::{Address, Parameter, Value, ValueFormat};
 use crate::IntoParameter;
-use std::convert::TryInto;
 
 type Char = u8;
 type Buf = [u8];
@@ -221,8 +220,20 @@ fn parameter(buf: &Buf) -> IResult<&Buf, Parameter> {
 fn x328_value(buf: &Buf) -> IResult<&Buf, Value> {
     terminated(
         map_res(
-            take_while_m_n(1, 6, |c: Char| c.is_ascii_digit() || c == b'+' || c == b'-'),
-            |b: &Buf| b.try_into(),
+            consumed(map_parser(
+                take_while_m_n(1, 6, |c: Char| c.is_ascii_digit() || c == b'+' || c == b'-'),
+                i32,
+            )),
+            |(buf, val): (&Buf, _)| {
+                Value::new_fmt(
+                    val,
+                    if buf.len() == 6 {
+                        ValueFormat::Wide
+                    } else {
+                        ValueFormat::Normal
+                    },
+                )
+            },
         ),
         ascii_char(ETX),
     )(buf)
