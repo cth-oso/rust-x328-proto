@@ -239,14 +239,14 @@ type WriteResult = Result<(), Error>;
 /// ```
 #[derive(Debug)]
 pub struct ReceiveWriteResponse<'a> {
-    master: &'a mut Master,
+    _master: PhantomData<&'a mut Master>,
     buffer: Buffer,
 }
 
 impl<'a> ReceiveWriteResponse<'a> {
-    fn new(master: &'a mut Master) -> Self {
+    fn new(_master: &'a mut Master) -> Self {
         ReceiveWriteResponse {
-            master,
+            _master: PhantomData,
             buffer: Buffer::new(),
         }
     }
