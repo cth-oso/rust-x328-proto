@@ -225,6 +225,18 @@ type WriteResult = Result<(), Error>;
 
 /// Call [`receive_data()`](Receiver::receive_data()) to process the
 /// received response data from the node.
+///
+/// Test that the borrow-checker prevents concurrent commands
+/// ```compile_fail
+/// use x328_proto::Master;
+/// use x328_proto::master::Receiver;
+/// use x328_proto::types::{addr, param, value};
+/// let mut m = Master::new();
+/// let s = m.write_parameter(addr(10), param(20), value(30));
+/// let mut r = s.data_sent();
+/// let s = m.write_parameter(addr(12), param(11), value(0));
+/// r.receive_data(&[1]);
+/// ```
 #[derive(Debug)]
 pub struct ReceiveWriteResponse<'a> {
     master: &'a mut Master,
