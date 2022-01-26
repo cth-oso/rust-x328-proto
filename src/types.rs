@@ -1,3 +1,6 @@
+//! This module defines range-checked types for X3.28 addresses, parameters
+//! and values, meant to simplify correct usage of the API.
+
 use thiserror::Error;
 
 use arrayvec::ArrayVec;
@@ -31,6 +34,14 @@ pub enum Error {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone, Hash)]
 #[repr(transparent)]
 pub struct Address(u8);
+
+/// Create a new [`Address`], panics if it is out of range.
+pub const fn addr(a: u8) -> Address {
+    if a <= 99 {
+        return Address(a);
+    }
+    panic!("Invalid address.")
+}
 
 impl Address {
     /// Create a new address, checking that the address is in \[0, 99\].
@@ -135,6 +146,15 @@ mod address_tests {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone, Hash)]
 #[repr(transparent)]
 pub struct Parameter(i16);
+
+/// Create a new [`Parameter`], panics if it is out of range.
+pub const fn param(p: i16) -> Parameter {
+    if p >= 0 && p <= 9999 {
+        Parameter(p)
+    } else {
+        panic!("Invalid parameter.")
+    }
+}
 
 impl Parameter {
     /// Create a new `Parameter`, checking that the given value
@@ -261,13 +281,16 @@ mod parameter_tests {
     }
 }
 
+/// `ValueFormat` determines how a `Value` is represented in the on-wire format.
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum ValueFormat {
+    /// Always uses six bytes on the wire, leading sign is included if it fits.
     Wide,
+    /// Uses as few bytes as possible for representing the value.
     Normal,
 }
 
-/// Value represents an integer that can be sent over the X3.28 protocol.
+/// Value represents a parameter value that can be sent over the X3.28 protocol.
 ///
 /// It is range limited to [-99999, 999999], since the on-wire representation
 /// is limited to six ascii characters.
@@ -278,6 +301,19 @@ pub(crate) type ValueBytes = ArrayVec<u8, 6>;
 
 const VAL_RANGE: RangeInclusive<i32> = -99_999..=999_999;
 const VAL_MIN_NORM: i32 = -9999;
+
+/// Create a new [`Value`], panics if it is out of range.
+pub const fn value(v: i32) -> Value {
+    if v < *VAL_RANGE.start() || v > *VAL_RANGE.end() {
+        panic!("Value out of range.")
+    }
+    let fmt = if v < VAL_MIN_NORM {
+        ValueFormat::Wide
+    } else {
+        ValueFormat::Normal
+    };
+    Value(v, fmt)
+}
 
 impl Value {
     /// Create a new `Value`, checking that the given `value` can be represented

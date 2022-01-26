@@ -16,7 +16,7 @@ pub use types::{
 
 mod buffer;
 mod nom_parser;
-mod types;
+pub mod types;
 
 mod ascii {
     /// Acknowledge
