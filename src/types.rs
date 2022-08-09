@@ -22,16 +22,16 @@ pub enum Error {
     InvalidValue,
 }
 
-const fn invalid_address() -> InvalidAddress {
-    InvalidAddress {}
+const fn invalid_address() -> InvalidAddressSnafu {
+    InvalidAddressSnafu
 }
 
-const fn invalid_parameter() -> InvalidParameter {
-    InvalidParameter {}
+const fn invalid_parameter() -> InvalidParameterSnafu {
+    InvalidParameterSnafu
 }
 
-const fn invalid_value() -> InvalidValue {
-    InvalidValue {}
+const fn invalid_value() -> InvalidValueSnafu {
+    InvalidValueSnafu
 }
 
 /// Address is a range-checked [0, 99] integer, representing a node address.

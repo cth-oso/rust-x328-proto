@@ -260,8 +260,10 @@ impl Receiver<WriteResult> for ReceiveWriteResponse<'_> {
 
         ReceiveDataProgress::Done(match parse_write_response(self.buffer.as_ref()) {
             ResponseToken::WriteOk => Ok(()),
-            ResponseToken::WriteFailed | ResponseToken::InvalidParameter => CommandFailed.fail(),
-            _ => ProtocolError.fail(),
+            ResponseToken::WriteFailed | ResponseToken::InvalidParameter => {
+                CommandFailedSnafu.fail()
+            }
+            _ => ProtocolSnafu.fail(),
         })
     }
 }
@@ -322,8 +324,8 @@ impl Receiver<ReadResult> for ReceiveReadResponse<'_> {
                 self.master.read_again = Some((self.address, parameter));
                 ReadResult::Ok(value)
             }
-            ResponseToken::InvalidParameter => InvalidParameter {}.fail(),
-            _ => ProtocolError.fail(),
+            ResponseToken::InvalidParameter => InvalidParameterSnafu.fail(),
+            _ => ProtocolSnafu.fail(),
         })
     }
 }
@@ -378,7 +380,7 @@ pub mod io {
                     Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
                     x => x,
                 }
-                .context(IoError {})?;
+                .context(IoSnafu {})?;
 
                 match self.receive_data(&data[..len]) {
                     ReceiveDataProgress::Done(response) => return Ok(response),
@@ -404,7 +406,7 @@ pub mod io {
                 Ok(_) => Ok(self.data_sent()),
                 Err(err) => Err(err),
             }
-            .context(IoError {})
+            .context(IoSnafu {})
         }
     }
 
@@ -444,13 +446,13 @@ pub mod io {
             value: impl IntoValue,
         ) -> Result<(), Error> {
             let (address, parameter) = check_addr_param(address, parameter)?;
-            let value = value.into_value().context(InvalidArgument {})?;
+            let value = value.into_value().context(InvalidArgumentSnafu)?;
             let response = self
                 .proto
                 .write_parameter(address, parameter, value)
                 .write_to(&mut self.stream)?
                 .receive_from(&mut self.stream)?;
-            response.context(ProtocolError)
+            response.context(ProtocolSnafu)
         }
 
         /// Send a read command to the node
@@ -465,7 +467,7 @@ pub mod io {
                 .read_parameter(address, parameter)
                 .write_to(&mut self.stream)?
                 .receive_from(&mut self.stream)?;
-            response.context(ProtocolError)
+            response.context(ProtocolSnafu)
         }
     } // impl Master
 
@@ -474,8 +476,8 @@ pub mod io {
         param: impl IntoParameter,
     ) -> Result<(Address, Parameter), Error> {
         Ok((
-            addr.into_address().context(InvalidArgument {})?,
-            param.into_parameter().context(InvalidArgument {})?,
+            addr.into_address().context(InvalidArgumentSnafu)?,
+            param.into_parameter().context(InvalidArgumentSnafu)?,
         ))
     }
 } // mod io
