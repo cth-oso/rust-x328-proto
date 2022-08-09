@@ -4,8 +4,8 @@
 use snafu::{ensure, OptionExt, Snafu};
 
 use arrayvec::ArrayVec;
-use std::convert::{TryFrom, TryInto};
-use std::ops::{Deref, RangeInclusive};
+use core::convert::{TryFrom, TryInto};
+use core::ops::{Deref, RangeInclusive};
 
 /// Error type for this module
 #[derive(Debug, Snafu)]

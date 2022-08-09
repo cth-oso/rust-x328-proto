@@ -37,8 +37,8 @@
 use arrayvec::ArrayVec;
 use snafu::Snafu;
 
-use std::fmt::{Debug, Formatter};
-use std::marker::PhantomData;
+use core::fmt::{self, Debug, Formatter};
+use core::marker::PhantomData;
 
 use crate::ascii::*;
 use crate::bcc;
@@ -58,7 +58,7 @@ pub struct Master {
 }
 
 impl Debug for Master {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         write!(
             f,
             "Master {{ read_again: {:?}, nodes: [..]}}",
@@ -330,6 +330,7 @@ impl Receiver<ReadResult> for ReceiveReadResponse<'_> {
     }
 }
 
+#[cfg(any(feature = "std", test))]
 /// Sample implementation of the X3.28 bus controller
 /// for an IO-channel implementing `std::io::{Read, Write}`.
 pub mod io {

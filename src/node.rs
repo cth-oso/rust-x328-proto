@@ -128,7 +128,7 @@ impl From<WriteParam> for NodeState {
     }
 }
 
-type CommonState = Box<CommonStateStruct>;
+type CommonState = CommonStateStruct;
 
 #[derive(Debug)]
 struct CommonStateStruct {
@@ -147,10 +147,10 @@ impl ReceiveData {
     /// Create a new bus node instance in the "receive" state without the `NodeState` wrapper.
     pub fn new(address: impl IntoAddress) -> Result<Self, TypeError> {
         Ok(Self {
-            state: Box::new(CommonStateStruct {
+            state: CommonStateStruct {
                 address: address.into_address()?,
                 read_again_param: None,
-            }),
+            },
             input_buffer: Buffer::new(),
         })
     }

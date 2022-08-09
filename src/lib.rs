@@ -1,3 +1,5 @@
+#![cfg_attr(not(any(feature = "std", test)), no_std)]
+
 //! Sans-IO implementation of the ANSI X3.28 serial line protocol
 //!
 //! X3.28 is an old field bus protocol, commonly used on top of a RS-422 bus.
