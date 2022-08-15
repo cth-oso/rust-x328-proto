@@ -13,7 +13,8 @@ pub mod node;
 pub use master::Master;
 pub use node::NodeState;
 pub use types::{
-    Address, Error as TypeError, IntoAddress, IntoParameter, IntoValue, Parameter, Value,
+    addr, param, value, Address, Error as TypeError, IntoAddress, IntoParameter, IntoValue,
+    Parameter, Value,
 };
 
 mod buffer;
@@ -27,7 +28,8 @@ mod ascii {
     pub const BS: u8 = 8;
     /// Enquiry, terminates a parameter read
     pub const ENQ: u8 = 5;
-    /// "End of transmission", sent as first byte of each command
+    /// "End of transmission", sent as first byte of each command.
+    /// A node will reply with EOT if the parameter number in a request is invalid.
     pub const EOT: u8 = 4;
     /// End of text, sent after parameter value
     pub const ETX: u8 = 3;

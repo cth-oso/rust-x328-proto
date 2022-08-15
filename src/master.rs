@@ -275,11 +275,11 @@ type ReadResult = Result<Value, Error>;
 pub enum Error {
     /// The node responded `EOT` to a command, indicating that
     /// the sent `Parameter` doesn't exist on the node.
-    #[snafu(display("Node responded EOT to command."))]
+    #[snafu(display("Invalid parameter, EOT received."))]
     InvalidParameter,
     /// `NAK` response from node, indicating that the command
     /// couldn't be processed successfully.
-    #[snafu(display("Node responded NAK to command."))]
+    #[snafu(display("Command failed, NAK received."))]
     CommandFailed,
     /// Invalid data received from node, or some other protocol
     /// failure.

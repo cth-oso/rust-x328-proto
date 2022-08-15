@@ -10,7 +10,7 @@ documentation = "https://docs.rs/x328-proto/"
 repository = "https://github.com/cth-oso/rust-x328-proto"
 
 keywords = ["x328", "protocol", "sans-io"]
-categories = ["encoding", "network-programming", "parser-implementations"]
+categories = ["encoding", "network-programming", "parser-implementations", "no-std"]
 
 [dependencies]
 arrayvec = { version = "0.7", default-features=false }
