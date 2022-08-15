@@ -382,6 +382,7 @@ pub mod io {
                     x => x,
                 }
                 .context(IoSnafu {})?;
+                log::trace!("Received {:?}", &data[..len]);
 
                 match self.receive_data(&data[..len]) {
                     ReceiveDataProgress::Done(response) => return Ok(response),
@@ -400,6 +401,7 @@ pub mod io {
         Rec: Receiver<Res>,
     {
         fn write_to(self, writer: &mut impl Write) -> Result<Rec, Error> {
+            log::trace!("Sending {:?}", self.get_data());
             match writer
                 .write_all(self.get_data())
                 .and_then(|_| writer.flush())
