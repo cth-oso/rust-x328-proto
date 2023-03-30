@@ -40,15 +40,9 @@ use crate::buffer::Buffer;
 use crate::nom_parser::master::{parse_read_response, parse_write_response, ResponseToken};
 use crate::types::{Address, Parameter, Value};
 
-#[derive(Copy, Clone)]
-struct NodeState {
-    can_read_again: bool,
-}
-
 /// X3.28 bus controller.
 pub struct Master {
     read_again: Option<(Address, Parameter)>,
-    nodes: [NodeState; 100],
 }
 
 impl Debug for Master {
@@ -70,12 +64,7 @@ impl Default for Master {
 impl Master {
     /// Create a new instance of the X3.28 bus controller protocol.
     pub const fn new() -> Self {
-        Self {
-            read_again: None,
-            nodes: [NodeState {
-                can_read_again: false,
-            }; 100],
-        }
+        Self { read_again: None }
     }
 
     /// Initiate a write command to a node.
@@ -113,6 +102,28 @@ impl Master {
         parameter: Parameter,
     ) -> impl SendData<Response = Value> + '_ {
         let mut buffer = Buffer::new();
+        self.read_again.take(); // clear the "read again" state
+        buffer.push(EOT);
+        buffer.write(&address.to_bytes());
+        buffer.write(&parameter.to_bytes());
+        buffer.push(ENQ);
+
+        ReadCmd {
+            master: self,
+            buffer,
+            parameter,
+            read_again: None,
+        }
+    }
+
+    /// Initiate a read command to a node. This method may use the abbreviated command form
+    /// for consecutive reads from a node.
+    pub fn read_parameter_again(
+        &mut self,
+        address: Address,
+        parameter: Parameter,
+    ) -> impl SendData<Response = Value> + '_ {
+        let mut buffer = Buffer::new();
         if let Some(again) = self.try_read_again(address, parameter) {
             buffer.push(again);
         } else {
@@ -121,11 +132,12 @@ impl Master {
             buffer.write(&parameter.to_bytes());
             buffer.push(ENQ);
         }
+
         ReadCmd {
             master: self,
             buffer,
-            address,
             parameter,
+            read_again: Some(address),
         }
     }
 
@@ -133,7 +145,7 @@ impl Master {
     /// Consumes the `self.read_again` value
     fn try_read_again(&mut self, address: Address, parameter: Parameter) -> Option<u8> {
         let (old_addr, old_param) = self.read_again.take()?;
-        if old_addr == address && self.get_node_capabilities(address).can_read_again {
+        if old_addr == address {
             match *parameter - *old_param {
                 0 => Some(NAK),
                 1 => Some(ACK),
@@ -143,16 +155,6 @@ impl Master {
         } else {
             None
         }
-    }
-
-    /// Enable/disable the short form "read again" command type for a specific node.
-    /// By default this is disabled for all addresses.
-    pub fn read_again_enable(&mut self, address: Address, can_read_again: bool) {
-        self.nodes[*address as usize] = NodeState { can_read_again };
-    }
-
-    fn get_node_capabilities(&self, address: Address) -> NodeState {
-        self.nodes[*address as usize]
     }
 }
 
@@ -216,8 +218,8 @@ impl ReceiveData for WriteCmd {
 struct ReadCmd<'a> {
     master: &'a mut Master,
     buffer: Buffer,
-    address: Address,
     parameter: Parameter,
+    read_again: Option<Address>,
 }
 
 impl SendData for ReadCmd<'_> {
@@ -242,7 +244,7 @@ impl ReceiveData for ReadCmd<'_> {
         Some(match parse_read_response(self.buffer.as_ref()) {
             ResponseToken::NeedData => return None,
             ResponseToken::ReadOk { parameter, value } if (parameter == self.parameter) => {
-                self.master.read_again = Some((self.address, parameter));
+                self.master.read_again = self.read_again.map(|addr| (addr, self.parameter));
                 Ok(value)
             }
             ResponseToken::InvalidParameter => InvalidParameterSnafu.fail(),
@@ -325,12 +327,6 @@ pub mod io {
             }
         }
 
-        /// Enable/disable the short form "read again" command for a
-        /// specific node address.
-        pub fn set_can_read_again(&mut self, address: Address, value: bool) {
-            self.proto.read_again_enable(address, value);
-        }
-
         /// Send a write command to the node.
         pub fn write_parameter(
             &mut self,
@@ -352,6 +348,17 @@ pub mod io {
         ) -> Result<Value, Error> {
             let (address, parameter) = check_addr_param(address, parameter)?;
             let s = self.proto.read_parameter(address, parameter);
+            Self::send_recv(s, &mut self.stream)
+        }
+
+        /// Read node register using the abbreviated command form for consecutive reads.
+        pub fn read_parameter_again(
+            &mut self,
+            address: impl IntoAddress,
+            parameter: impl IntoParameter,
+        ) -> Result<Value, Error> {
+            let (address, parameter) = check_addr_param(address, parameter)?;
+            let s = self.proto.read_parameter_again(address, parameter);
             Self::send_recv(s, &mut self.stream)
         }
 
@@ -449,9 +456,8 @@ mod tests {
     fn read_again() {
         let (addr, param, _) = addr_param_val(10, 20, 56);
         let mut idle = Master::new();
-        idle.read_again_enable(addr, true);
         idle.read_again = Some((addr, param));
-        let send = idle.read_parameter(addr, param.next().unwrap());
+        let send = idle.read_parameter_again(addr, param.next().unwrap());
         assert_eq!(send.get_data(), [ACK]);
     }
 }

@@ -6,9 +6,9 @@ use std::sync::atomic::Ordering::SeqCst;
 use std::thread;
 use std::time::Duration;
 
+use x328_proto::master;
 use x328_proto::master::io::Master;
 use x328_proto::{addr, NodeState};
-use x328_proto::{master, IntoAddress};
 
 use common::{BusInterface, RS422Bus};
 
@@ -22,9 +22,8 @@ fn master_main_loop(io: BusInterface) -> Result<(), master::io::Error> {
         }
     }
     // test read again
-    master.set_can_read_again(5.into_address().unwrap(), true);
     for _ in 0..10 {
-        assert!(master.read_parameter(5, 25).is_ok());
+        assert!(master.read_parameter_again(5, 25).is_ok());
     }
     Ok(())
 }
