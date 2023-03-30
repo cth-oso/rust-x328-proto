@@ -30,16 +30,15 @@ fn node_main_loop() {
 
             NodeState::SendData(mut send) => {
                 serial.write_all(send.get_data()).unwrap();
-                send.data_sent()
+                send.data_sent().into()
             }
 
-            NodeState::ReadParameter(read_command) => {
-                if read_command.parameter() == 3 {
-                    read_command.send_invalid_parameter()
-                } else {
-                    read_command.send_reply_ok(4u16.into())
-                }
+            NodeState::ReadParameter(read_command) => if read_command.parameter() == 3 {
+                read_command.send_invalid_parameter()
+            } else {
+                read_command.send_reply_ok(4u16.into())
             }
+            .into(),
 
             NodeState::WriteParameter(write_command) => {
                 let param = write_command.parameter();
@@ -49,6 +48,7 @@ fn node_main_loop() {
                     registers.insert(param, write_command.value());
                     write_command.write_ok()
                 }
+                .into()
             }
         };
     }

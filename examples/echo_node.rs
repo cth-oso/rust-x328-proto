@@ -22,7 +22,7 @@ fn node_main_loop() -> Result<(), Box<dyn Error>> {
 
             NodeState::SendData(mut send) => {
                 io::stdout().write_all(send.get_data())?;
-                send.data_sent()
+                send.data_sent().into()
             }
 
             NodeState::ReadParameter(read_command) => {
@@ -32,6 +32,7 @@ fn node_main_loop() -> Result<(), Box<dyn Error>> {
                 } else {
                     read_command.send_reply_ok(4u16.into())
                 }
+                .into()
             }
 
             NodeState::WriteParameter(write_command) => {
@@ -43,6 +44,7 @@ fn node_main_loop() -> Result<(), Box<dyn Error>> {
                     registers.insert(param, write_command.value());
                     write_command.write_ok()
                 }
+                .into()
             }
         };
     }

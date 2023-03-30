@@ -44,7 +44,7 @@ use crate::types::{Address, Parameter, Value};
 ///
 ///            NodeState::SendData(mut send) => {
 ///                serial.write_all(send.get_data()).unwrap();
-///                send.data_sent()
+///                send.data_sent().into()
 ///            }
 ///
 ///            NodeState::ReadParameter(read_command) => {
@@ -52,7 +52,7 @@ use crate::types::{Address, Parameter, Value};
 ///                    read_command.send_invalid_parameter()
 ///                } else {
 ///                    read_command.send_reply_ok(4u16.into())
-///                }
+///                }.into()
 ///            }
 ///
 ///            NodeState::WriteParameter(write_command) => {
@@ -61,7 +61,7 @@ use crate::types::{Address, Parameter, Value};
 ///                    write_command.write_error()
 ///                } else {
 ///                    write_command.write_ok()
-///                }
+///                }.into()
 ///            }
 ///        };
 /// }
@@ -94,7 +94,7 @@ impl NodeState {
 
     /// Do not send any reply to the master. Transition to the idle `ReceiveData` state instead.
     /// You really shouldn't do this, since this will leave the master waiting until it times out.
-    pub fn no_reply(self) -> Self {
+    pub fn no_reply(self) -> ReceiveData {
         match self {
             Self::ReceiveData(ReceiveData { state, .. })
             | Self::SendData(SendData { state, .. })
@@ -155,12 +155,11 @@ impl ReceiveData {
         }
     }
 
-    fn from_state(state: CommonState) -> NodeState {
+    fn from_state(state: CommonState) -> Self {
         Self {
             state,
             input_buffer: Buffer::new(),
         }
-        .into()
     }
 
     /// Feed data into the internal buffer, and try to parse the buffer afterwards.
@@ -209,7 +208,7 @@ impl ReceiveData {
                     _ => Some(last_param),
                 } {
                     Some(param) => ReadParam::from_state(self.state, addr, param),
-                    None => SendData::from_byte(self.state, EOT),
+                    None => SendData::from_byte(self.state, EOT).into(),
                 }
             }
             InvalidPayload(address) if address == self.state.address => self.send_nak(),
@@ -222,7 +221,7 @@ impl ReceiveData {
     }
 
     fn send_nak(self) -> NodeState {
-        SendData::from_byte(self.state, NAK)
+        SendData::from_byte(self.state, NAK).into()
     }
 
     fn for_us(&self, address: Address) -> bool {
@@ -244,14 +243,14 @@ pub struct SendData {
 }
 
 impl SendData {
-    fn from_state(state: CommonState, data: SendDataStore) -> NodeState {
-        Self { state, data }.into()
+    fn from_state(state: CommonState, data: SendDataStore) -> Self {
+        Self { state, data }
     }
 
-    fn from_byte(state: CommonState, byte: u8) -> NodeState {
+    fn from_byte(state: CommonState, byte: u8) -> Self {
         let mut data = ArrayVec::new();
         data.push(byte);
-        Self { state, data }.into()
+        Self { state, data }
     }
 
     /// Returns the data to be sent on the bus.
@@ -260,8 +259,8 @@ impl SendData {
     }
 
     /// Signals that the data was sent, and it's time to go back to the
-    /// `ReadData` state.
-    pub fn data_sent(self) -> NodeState {
+    /// `ReceiveData` state.
+    pub fn data_sent(self) -> ReceiveData {
         ReceiveData::from_state(self.state)
     }
 }
@@ -286,7 +285,7 @@ impl ReadParam {
 
     /// Send a response to the master with the value of
     /// the parameter in the read request.
-    pub fn send_reply_ok(mut self, value: Value) -> NodeState {
+    pub fn send_reply_ok(mut self, value: Value) -> SendData {
         self.state.read_again_param = Some((self.address, self.parameter));
 
         let mut data = SendDataStore::new();
@@ -302,19 +301,19 @@ impl ReadParam {
     }
 
     /// Inform the master that the parameter in the request is invalid.
-    pub fn send_invalid_parameter(self) -> NodeState {
+    pub fn send_invalid_parameter(self) -> SendData {
         SendData::from_byte(self.state, EOT)
     }
 
     /// Inform the bus master that the read request failed
     /// for some reason other than invalid parameter number.
-    pub fn send_read_failed(self) -> NodeState {
+    pub fn send_read_failed(self) -> SendData {
         SendData::from_byte(self.state, NAK)
     }
 
     /// Do not send any reply to the master. Transition to the idle `ReceiveData` state instead.
     /// You really shouldn't do this, since this will leave the master waiting until it times out.
-    pub fn no_reply(self) -> NodeState {
+    pub fn no_reply(self) -> ReceiveData {
         ReceiveData::from_state(self.state)
     }
 
@@ -355,19 +354,19 @@ impl WriteParam {
     }
 
     /// Inform the master that the parameter value was successfully updated.
-    pub fn write_ok(self) -> NodeState {
+    pub fn write_ok(self) -> SendData {
         SendData::from_byte(self.state, ACK)
     }
 
     /// The parameter or value is invalid, or something else is preventing
     /// us from setting the parameter to the given value.
-    pub fn write_error(self) -> NodeState {
+    pub fn write_error(self) -> SendData {
         SendData::from_byte(self.state, NAK)
     }
 
     /// Do not send any reply to the master. Transition to the idle `ReceiveData` state instead.
     /// You really shouldn't do this, since this will leave the master waiting until it times out.
-    pub fn no_reply(self) -> NodeState {
+    pub fn no_reply(self) -> ReceiveData {
         ReceiveData::from_state(self.state)
     }
 
