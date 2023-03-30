@@ -25,6 +25,15 @@ impl Buffer {
         self.read_pos += len;
     }
 
+    pub fn push(&mut self, byte: u8) {
+        if self.data.is_full() {
+            // Run the data shifting logic in self.write()
+            self.write(&[byte])
+        } else {
+            self.data.push(byte)
+        }
+    }
+
     pub fn write(&mut self, mut bytes: &[u8]) {
         if self.read_pos == self.data.len() {
             self.clear();

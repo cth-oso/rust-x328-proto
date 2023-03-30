@@ -8,14 +8,11 @@
 //! # { Ok(Cursor::new(Vec::new())) }
 //! #
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
-//! use x328_proto::{Master, IntoAddress, IntoParameter, IntoValue};
-//! use x328_proto::master::{Receiver, ReceiveDataProgress};
+//! use x328_proto::{Master, addr, param, master::SendData};
 //! let mut master = Master::new();
 //! let mut serial = connect_serial_interface()?;
 //!
-//! let send = master.write_parameter(10.into_address()?,
-//!                                   3010.into_parameter()?,
-//!                                   (-30_i16).into());
+//! let send = &mut master.write_parameter(addr(10), param(3010), (-30_i16).into());
 //! serial.write_all(send.get_data())?;
 //! let mut recv = send.data_sent();
 //! loop {
@@ -25,20 +22,17 @@
 //!         // .. error handling ..
 //!         # return Ok(());
 //!     }
-//!     match recv.receive_data(&buf[..len]) {
-//!         ReceiveDataProgress::NeedData(new_recv) => recv = new_recv,
-//!         ReceiveDataProgress::Done(response) => break response,
+//!     if let Some(response) = recv.receive_data(&buf[..len]) {
+//!         break response;
 //!     }
 //! }?;
 //!
 //! # Ok(())}
 //! ```
 
-use arrayvec::ArrayVec;
 use snafu::Snafu;
 
 use core::fmt::{self, Debug, Formatter};
-use core::marker::PhantomData;
 
 use crate::ascii::*;
 use crate::bcc;
@@ -86,52 +80,53 @@ impl Master {
 
     /// Initiate a write command to a node.
     ///
-    /// The returned [`SendData`] struct holds the data that needs to be transmitted
+    /// The returned opaque type holds the data that should be transmitted
     /// on the bus. It also holds a mutable reference to self, so that only one
     /// operation can be in progress at a time.
     ///
-    /// Timeouts and other errors can be handled by dropping the `SendData` or
-    /// `ReceiveResponse` structs.
+    /// Timeouts and other errors can be handled by dropping the returned value.
     pub fn write_parameter(
         &mut self,
         address: Address,
         parameter: Parameter,
         value: Value,
-    ) -> SendData<ReceiveWriteResponse, WriteResult> {
+    ) -> impl SendData<Response = ()> + '_ {
         self.read_again = None;
-        let mut data = SendDataStore::new();
+        let mut data = Buffer::new();
         data.push(EOT);
-        data.try_extend_from_slice(&address.to_bytes())
-            .expect("BUG: Send data buffer too small.");
+        data.write(&address.to_bytes());
         data.push(STX);
-        data.try_extend_from_slice(&parameter.to_bytes())
-            .expect("BUG: Send data buffer too small.");
-        data.try_extend_from_slice(&value.to_bytes())
-            .expect("BUG: Send data buffer too small.");
+        data.write(&parameter.to_bytes());
+        data.write(&value.to_bytes());
         data.push(ETX);
-        data.push(bcc(&data[6..]));
-        SendData::new(data, ReceiveWriteResponse::new(self))
+        data.push(bcc(&data.as_ref()[6..]));
+        WriteCmd { data }
     }
 
     /// Initiate a read command to a node.
     ///
-    /// The returned [`SendData`] struct holds the data that needs to be transmitted
+    /// The returned opaque type holds the data that should be transmitted
     /// on the bus. See also [`write_parameter()`](Self::write_parameter()).
     pub fn read_parameter(
         &mut self,
         address: Address,
         parameter: Parameter,
-    ) -> SendData<ReceiveReadResponse, ReadResult> {
-        let mut data = SendDataStore::new();
+    ) -> impl SendData<Response = Value> + '_ {
+        let mut buffer = Buffer::new();
         if let Some(again) = self.try_read_again(address, parameter) {
-            data.push(again);
+            buffer.push(again);
         } else {
-            data.push(EOT);
-            data.try_extend_from_slice(&address.to_bytes()).unwrap();
-            data.try_extend_from_slice(&parameter.to_bytes()).unwrap();
-            data.push(ENQ);
+            buffer.push(EOT);
+            buffer.write(&address.to_bytes());
+            buffer.write(&parameter.to_bytes());
+            buffer.push(ENQ);
         }
-        SendData::new(data, ReceiveReadResponse::new(self, address, parameter))
+        ReadCmd {
+            master: self,
+            buffer,
+            address,
+            parameter,
+        }
     }
 
     /// Check if we can use the short "read-again" command form.
@@ -151,7 +146,7 @@ impl Master {
     }
 
     /// Enable/disable the short form "read again" command type for a specific node.
-    /// This is disabled by default for all nodes.
+    /// By default this is disabled for all addresses.
     pub fn read_again_enable(&mut self, address: Address, can_read_again: bool) {
         self.nodes[*address as usize] = NodeState { can_read_again };
     }
@@ -161,105 +156,55 @@ impl Master {
     }
 }
 
-type SendDataStore = ArrayVec<u8, 20>;
-
 /// `SendData` holds data that should be transmitted to the nodes.
 ///
 /// Call [`data_sent()`](Self::data_sent()) after the data has been
 /// successfully transmitted in order to transition to the "receive
 /// response" state. If data transmission fails this struct should be
 /// dropped in order to return to the idle state.
-#[derive(Debug)]
-pub struct SendData<'a, Rec: Receiver<Res>, Res> {
-    data: SendDataStore,
-    receiver: Rec,
-    _phantom: PhantomData<&'a Res>,
-}
-
-impl<'a, Rec: Receiver<Res>, Res> SendData<'a, Rec, Res> {
-    fn new(data: SendDataStore, receiver: Rec) -> Self {
-        SendData {
-            data,
-            receiver,
-            _phantom: PhantomData::default(),
-        }
-    }
-
-    /// Returns a reference to the data to be transmitted.
-    pub fn get_data(&self) -> &[u8] {
-        self.data.as_slice()
-    }
-
-    /// Call after data has been successfully transmitted in order
-    /// to transition to the "receive response" state.
-    pub fn data_sent(self) -> Rec {
-        self.receiver
-    }
-}
-
-mod private {
-    pub trait Receiver {}
-}
-
-/// Return value from `Receiver::receive_data()`
-/// Indicates if enough data has been received or if more data is needed.
-/// R is the receiver (Self), T is `Self::Response`
-pub enum ReceiveDataProgress<R, T> {
-    /// A complete response has been received, `T` is the result.
-    Done(T),
-    /// More data is needed. Read for the bus and pass the data to `R`.
-    NeedData(R),
-}
-
-/// Provides the `receive_data()` method for parsing response
-/// data from the nodes.
-pub trait Receiver<Response>: Sized + private::Receiver {
-    /// Receive and parse data from the bus.
-    ///
-    /// Note that the method consumes self, so it must be reclaimed
-    /// from the return value.
-    fn receive_data(self, data: &[u8]) -> ReceiveDataProgress<Self, Response>;
-}
-
-type WriteResult = Result<(), Error>;
-
-/// Call [`receive_data()`](Receiver::receive_data()) to process the
-/// received response data from the node.
 ///
-/// Test that the borrow-checker prevents concurrent commands
-/// ```compile_fail
-/// use x328_proto::Master;
-/// use x328_proto::master::Receiver;
-/// use x328_proto::types::{addr, param, value};
-/// let mut m = Master::new();
-/// let s = m.write_parameter(addr(10), param(20), value(30));
-/// let mut r = s.data_sent();
-/// let s = m.write_parameter(addr(12), param(11), value(0));
-/// r.receive_data(&[1]);
-/// ```
-#[derive(Debug)]
-pub struct ReceiveWriteResponse<'a> {
-    _master: PhantomData<&'a mut Master>,
-    buffer: Buffer,
+pub trait SendData {
+    /// The type of the value of the response to the query
+    type Response;
+    /// Returns the data that is to be sent on the bus to the nodes.
+    fn get_data(&self) -> &[u8];
+    /// Call when the data has been sent successfully and it is time to receive the response.
+    fn data_sent(&mut self) -> &mut dyn ReceiveData<Response = Self::Response>;
 }
 
-impl<'a> ReceiveWriteResponse<'a> {
-    fn new(_master: &'a mut Master) -> Self {
-        ReceiveWriteResponse {
-            _master: PhantomData,
-            buffer: Buffer::new(),
-        }
+/// Receives the command response from the node. Keep reading data from the bus
+/// until receive_data() returns Some(..).
+pub trait ReceiveData {
+    /// The type of the value of the response to the query
+    type Response;
+    /// Parse the query response from the nodes. Keep reading from the bus until Some(..) is returned.
+    fn receive_data(&mut self, data: &[u8]) -> Option<Result<Self::Response, Error>>;
+}
+
+struct WriteCmd {
+    data: Buffer,
+}
+
+impl SendData for WriteCmd {
+    type Response = ();
+
+    fn get_data(&self) -> &[u8] {
+        self.data.as_ref()
+    }
+
+    fn data_sent(&mut self) -> &mut dyn ReceiveData<Response = Self::Response> {
+        self.data.clear();
+        self
     }
 }
 
-impl private::Receiver for ReceiveWriteResponse<'_> {}
+impl ReceiveData for WriteCmd {
+    type Response = ();
 
-impl Receiver<WriteResult> for ReceiveWriteResponse<'_> {
-    fn receive_data(mut self, data: &[u8]) -> ReceiveDataProgress<Self, WriteResult> {
-        self.buffer.write(data);
-
-        ReceiveDataProgress::Done(match parse_write_response(self.buffer.as_ref()) {
+    fn receive_data(&mut self, data: &[u8]) -> Option<Result<Self::Response, Error>> {
+        Some(match parse_write_response(data) {
             ResponseToken::WriteOk => Ok(()),
+            // FIXME: restructure errors
             ResponseToken::WriteFailed | ResponseToken::InvalidParameter => {
                 CommandFailedSnafu.fail()
             }
@@ -268,7 +213,43 @@ impl Receiver<WriteResult> for ReceiveWriteResponse<'_> {
     }
 }
 
-type ReadResult = Result<Value, Error>;
+struct ReadCmd<'a> {
+    master: &'a mut Master,
+    buffer: Buffer,
+    address: Address,
+    parameter: Parameter,
+}
+
+impl SendData for ReadCmd<'_> {
+    type Response = Value;
+
+    fn get_data(&self) -> &[u8] {
+        self.buffer.as_ref()
+    }
+
+    fn data_sent(&mut self) -> &mut dyn ReceiveData<Response = Self::Response> {
+        self.buffer.clear();
+        self
+    }
+}
+
+impl ReceiveData for ReadCmd<'_> {
+    type Response = Value;
+
+    fn receive_data(&mut self, data: &[u8]) -> Option<Result<Self::Response, Error>> {
+        self.buffer.write(data);
+
+        Some(match parse_read_response(self.buffer.as_ref()) {
+            ResponseToken::NeedData => return None,
+            ResponseToken::ReadOk { parameter, value } if (parameter == self.parameter) => {
+                self.master.read_again = Some((self.address, parameter));
+                Ok(value)
+            }
+            ResponseToken::InvalidParameter => InvalidParameterSnafu.fail(),
+            _ => ProtocolSnafu.fail(),
+        })
+    }
+}
 
 /// Error type for the X3.28 bus controller
 #[derive(Debug, Snafu)]
@@ -287,56 +268,13 @@ pub enum Error {
     ProtocolError,
 }
 
-/// This struct implements the `Receiver` trait to receive and process
-/// the response to a read command.
-#[derive(Debug)]
-pub struct ReceiveReadResponse<'a> {
-    master: &'a mut Master,
-    buffer: Buffer,
-    address: Address,
-    expected_param: Parameter,
-}
-
-impl<'a> ReceiveReadResponse<'a> {
-    fn new(
-        master: &'a mut Master,
-        address: Address,
-        parameter: Parameter,
-    ) -> ReceiveReadResponse<'a> {
-        ReceiveReadResponse {
-            master,
-            buffer: Buffer::new(),
-            address,
-            expected_param: parameter,
-        }
-    }
-}
-
-impl private::Receiver for ReceiveReadResponse<'_> {}
-
-impl Receiver<ReadResult> for ReceiveReadResponse<'_> {
-    fn receive_data(mut self, data: &[u8]) -> ReceiveDataProgress<Self, ReadResult> {
-        self.buffer.write(data);
-
-        ReceiveDataProgress::Done(match parse_read_response(self.buffer.as_ref()) {
-            ResponseToken::NeedData => return ReceiveDataProgress::NeedData(self),
-            ResponseToken::ReadOk { parameter, value } if (parameter == self.expected_param) => {
-                self.master.read_again = Some((self.address, parameter));
-                ReadResult::Ok(value)
-            }
-            ResponseToken::InvalidParameter => InvalidParameterSnafu.fail(),
-            _ => ProtocolSnafu.fail(),
-        })
-    }
-}
-
 #[cfg(any(feature = "std", test))]
 /// Sample implementation of the X3.28 bus controller
 /// for an IO-channel implementing `std::io::{Read, Write}`.
 pub mod io {
     use snafu::{ResultExt, Snafu};
 
-    use crate::master::{Error as X328Error, ReceiveDataProgress, Receiver, SendData};
+    use crate::master::{Error as X328Error, ReceiveData, SendData};
     use crate::types::{self, IntoAddress, IntoParameter, IntoValue, Value};
     use crate::{Address, Parameter};
     use std::io::{Read, Write};
@@ -363,54 +301,6 @@ pub mod io {
             /// The original std::io error
             source: std::io::Error,
         },
-    }
-
-    trait ReceiveFrom<Res>: Receiver<Res> {
-        fn receive_from(self, reader: &mut impl Read) -> Result<Res, Error>;
-    }
-
-    impl<R: Receiver<Res>, Res> ReceiveFrom<Res> for R {
-        fn receive_from(mut self, reader: &mut impl Read) -> Result<Res, Error> {
-            let mut data = [0];
-            loop {
-                let len = match reader.read(&mut data) {
-                    Ok(0) => Err(std::io::Error::new(
-                        std::io::ErrorKind::UnexpectedEof,
-                        "Read returned Ok(0)",
-                    )),
-                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-                    x => x,
-                }
-                .context(IoSnafu {})?;
-                log::trace!("Received {:?}", &data[..len]);
-
-                match self.receive_data(&data[..len]) {
-                    ReceiveDataProgress::Done(response) => return Ok(response),
-                    ReceiveDataProgress::NeedData(reader) => self = reader,
-                }
-            }
-        }
-    }
-
-    trait WriteData<R> {
-        fn write_to(self, writer: &mut impl std::io::Write) -> Result<R, Error>;
-    }
-
-    impl<Rec, Res> WriteData<Rec> for SendData<'_, Rec, Res>
-    where
-        Rec: Receiver<Res>,
-    {
-        fn write_to(self, writer: &mut impl Write) -> Result<Rec, Error> {
-            log::trace!("Sending {:?}", self.get_data());
-            match writer
-                .write_all(self.get_data())
-                .and_then(|_| writer.flush())
-            {
-                Ok(_) => Ok(self.data_sent()),
-                Err(err) => Err(err),
-            }
-            .context(IoSnafu {})
-        }
     }
 
     /// X3.28 bus controller with IO using the `std::io::{Read, Write}` traits.
@@ -450,12 +340,8 @@ pub mod io {
         ) -> Result<(), Error> {
             let (address, parameter) = check_addr_param(address, parameter)?;
             let value = value.into_value().context(InvalidArgumentSnafu)?;
-            let response = self
-                .proto
-                .write_parameter(address, parameter, value)
-                .write_to(&mut self.stream)?
-                .receive_from(&mut self.stream)?;
-            response.context(ProtocolSnafu)
+            let s = self.proto.write_parameter(address, parameter, value);
+            Self::send_recv(s, &mut self.stream)
         }
 
         /// Send a read command to the node
@@ -465,12 +351,54 @@ pub mod io {
             parameter: impl IntoParameter,
         ) -> Result<Value, Error> {
             let (address, parameter) = check_addr_param(address, parameter)?;
-            let response = self
-                .proto
-                .read_parameter(address, parameter)
-                .write_to(&mut self.stream)?
-                .receive_from(&mut self.stream)?;
-            response.context(ProtocolSnafu)
+            let s = self.proto.read_parameter(address, parameter);
+            Self::send_recv(s, &mut self.stream)
+        }
+
+        fn send_recv<R>(
+            mut send: impl SendData<Response = R>,
+            mut io: impl Read + Write,
+        ) -> Result<R, Error> {
+            let r = Self::send_data(&mut send, &mut io)?;
+            Self::recv_response(r, io)
+        }
+
+        fn send_data<R>(
+            send: &mut dyn SendData<Response = R>,
+            mut writer: impl Write,
+        ) -> Result<&mut dyn ReceiveData<Response = R>, Error> {
+            log::trace!("Sending {:?}", send.get_data());
+            match writer
+                .write_all(send.get_data())
+                .and_then(|_| writer.flush())
+            {
+                Ok(_) => Ok(send.data_sent()),
+                Err(err) => Err(err),
+            }
+            .context(IoSnafu {})
+        }
+
+        fn recv_response<R>(
+            recv: &mut dyn ReceiveData<Response = R>,
+            mut reader: impl Read,
+        ) -> Result<R, Error> {
+            let mut data = [0];
+            loop {
+                let len = match reader.read(&mut data) {
+                    Ok(0) => Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "Read returned Ok(0)",
+                    )),
+                    Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                    x => x,
+                }
+                .context(IoSnafu {})?;
+                log::trace!("Received {:?}", &data[..len]);
+
+                if let Some(r) = recv.receive_data(&data[..len]) {
+                    return r.context(ProtocolSnafu);
+                }
+            }
         }
     } // impl Master
 
