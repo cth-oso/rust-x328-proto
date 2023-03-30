@@ -2,12 +2,12 @@ use std::collections::HashMap;
 use std::io::{self, Read, Write};
 
 use std::error::Error;
-use x328_proto::NodeState;
+use x328_proto::{addr, NodeState};
 
 fn node_main_loop() -> Result<(), Box<dyn Error>> {
     let mut registers = HashMap::new();
 
-    let mut node = NodeState::new(10)?;
+    let mut node = NodeState::new(addr(10));
 
     loop {
         node = match node {

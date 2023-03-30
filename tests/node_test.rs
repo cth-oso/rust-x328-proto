@@ -3,7 +3,7 @@ mod common;
 use common::{SerialIOPlane, SerialInterface};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use x328_proto::{NodeState, Parameter, Value};
+use x328_proto::{addr, NodeState, Parameter, Value};
 
 #[test]
 fn node_main_loop() {
@@ -12,7 +12,7 @@ fn node_main_loop() {
     let mut serial = SerialIOPlane::new(&serial_sim);
     let mut registers: HashMap<Parameter, Value> = HashMap::new();
 
-    let mut node = NodeState::new(10).unwrap();
+    let mut node = NodeState::new(addr(10));
 
     'main: loop {
         node = match node {
