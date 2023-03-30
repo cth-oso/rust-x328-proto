@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use x328_proto::master::io::Master;
-use x328_proto::NodeState;
+use x328_proto::{addr, NodeState};
 use x328_proto::{master, IntoAddress};
 
 use common::{BusInterface, RS422Bus};
@@ -30,7 +30,7 @@ fn master_main_loop(io: BusInterface) -> Result<(), master::io::Error> {
 }
 
 fn node_main_loop(mut serial: BusInterface) {
-    let mut node = NodeState::new(5).unwrap();
+    let mut node = NodeState::new(addr(5));
     'main: loop {
         if SHUTDOWN.load(SeqCst) {
             break 'main;

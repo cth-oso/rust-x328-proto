@@ -6,7 +6,7 @@ use crate::ascii::*;
 use crate::bcc;
 use crate::buffer::Buffer;
 use crate::nom_parser::node::{parse_command, CommandToken};
-use crate::types::{Address, Error as TypeError, IntoAddress, Parameter, Value};
+use crate::types::{Address, Parameter, Value};
 
 /// Bus node (listener/server) part of the X3.28 protocol
 ///
@@ -23,8 +23,8 @@ use crate::types::{Address, Error as TypeError, IntoAddress, Parameter, Value};
 /// # { Ok(Cursor::new(Vec::new())) }
 /// #
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// use x328_proto::Value;
-/// let mut node = NodeState::new(10)?; // new protocol instance with address 10
+/// use x328_proto::{addr, Value};
+/// let mut node = NodeState::new(addr(10)); // new protocol instance with address 10
 /// let mut serial = connect_serial_interface()?;
 ///
 /// 'main: loop {
@@ -85,11 +85,11 @@ impl NodeState {
     /// # Example
     ///
     /// ```
-    /// use x328_proto::NodeState;
-    /// let mut node: NodeState = NodeState::new(10).unwrap(); // new protocol instance with address 10
+    /// use x328_proto::{addr, NodeState};
+    /// let mut node: NodeState = NodeState::new(addr(10)); // new protocol instance with address 10
     /// ```
-    pub fn new(address: impl IntoAddress) -> Result<Self, TypeError> {
-        Ok(ReceiveData::new(address)?.into())
+    pub fn new(address: Address) -> Self {
+        ReceiveData::new(address).into()
     }
 
     /// Do not send any reply to the master. Transition to the idle `ReceiveData` state instead.
@@ -145,14 +145,14 @@ pub struct ReceiveData {
 
 impl ReceiveData {
     /// Create a new bus node instance in the "receive" state without the `NodeState` wrapper.
-    pub fn new(address: impl IntoAddress) -> Result<Self, TypeError> {
-        Ok(Self {
+    pub fn new(address: Address) -> Self {
+        Self {
             state: CommonStateStruct {
-                address: address.into_address()?,
+                address,
                 read_again_param: None,
             },
             input_buffer: Buffer::new(),
-        })
+        }
     }
 
     fn from_state(state: CommonState) -> NodeState {
