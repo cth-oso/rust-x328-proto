@@ -1,7 +1,7 @@
 //! The bus controller half of the X3.28 protocol
 //!
 //! # Example
-//! See [`crate::master::io::Master`] for a more elaborate example of synchronus IO.
+//! See [`crate::master::io::Master`] for a more elaborate example of synchronous IO.
 //! ```
 //! # use std::io::{Read, Write, Cursor};
 //! # fn connect_serial_interface() -> Result<Cursor<Vec<u8>>,  &'static str>
