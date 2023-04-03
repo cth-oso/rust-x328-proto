@@ -183,8 +183,9 @@ pub trait ReceiveData {
     fn receive_data(&mut self, data: &[u8]) -> Option<Result<Self::Response, Error>>;
 }
 
+const WRITE_BUF_LEN: usize = 1 + 4 + 1 + 4 + 6 + 1 + 1; // EOT addr STX param value ETX bcc
 struct WriteCmd {
-    data: Buffer,
+    data: Buffer<WRITE_BUF_LEN>,
 }
 
 impl SendData for WriteCmd {
@@ -215,9 +216,10 @@ impl ReceiveData for WriteCmd {
     }
 }
 
+const READ_CMD_BUF_LEN: usize = 1 + 4 + 6 + 1 + 1; // the response must fit in this buffer
 struct ReadCmd<'a> {
     master: &'a mut Master,
-    buffer: Buffer,
+    buffer: Buffer<READ_CMD_BUF_LEN>,
     parameter: Parameter,
     read_again: Option<Address>,
 }
@@ -445,11 +447,19 @@ mod tests {
 
     #[test]
     fn read_parameter() {
-        let (addr, param, _) = addr_param_val(43, 1234, 56);
+        let (addr, param, val) = addr_param_val(43, 1234, 12345);
         let mut master = Master::new();
-        let x = master.read_parameter(addr, param);
+        let mut x = master.read_parameter(addr, param);
         // println!("{}", String::from_utf8(x.as_slice().to_vec()).unwrap());
         assert_eq!(x.get_data(), b"\x0444331234\x05");
+        let recv = x.data_sent();
+        // println!("{:x}", bcc(b"123412345\x03"));
+        assert_eq!(
+            recv.receive_data(b"\x02123412345\x03\x36")
+                .unwrap()
+                .unwrap(),
+            val
+        );
     }
 
     #[test]

@@ -148,7 +148,7 @@ pub mod node {
         #[test]
         fn test_parse_command() {
             use node::*;
-            let mut buf = Buffer::new();
+            let mut buf = Buffer::<1>::new();
             buf.write(b"0");
             assert_eq!(parse_command(buf.as_ref()), (1, NeedData));
 

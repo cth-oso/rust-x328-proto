@@ -1,14 +1,14 @@
 use arrayvec::ArrayVec;
 
-const BUF_SIZE: usize = 40; // The maximum X3.28 message length is 18 bytes
+const DEFAULT_BUF_SIZE: usize = 40; // The maximum X3.28 message length is 18 bytes
 
 #[derive(Debug)]
-pub struct Buffer {
+pub struct Buffer<const BUF_SIZE: usize = DEFAULT_BUF_SIZE> {
     data: ArrayVec<u8, BUF_SIZE>,
     read_pos: usize,
 }
 
-impl Buffer {
+impl<const BUF_SIZE: usize> Buffer<BUF_SIZE> {
     pub fn new() -> Self {
         Self {
             data: ArrayVec::new(),
@@ -64,7 +64,7 @@ impl Buffer {
     }
 }
 
-impl AsRef<[u8]> for Buffer {
+impl<const BUF_SIZE: usize> AsRef<[u8]> for Buffer<BUF_SIZE> {
     fn as_ref(&self) -> &[u8] {
         &self.data[self.read_pos..]
     }
@@ -88,8 +88,8 @@ mod tests {
 
     #[test]
     fn buffer_spill() {
-        let mut buf = Buffer::new();
-        for _ in 0..(BUF_SIZE + 1) {
+        let mut buf = Buffer::<DEFAULT_BUF_SIZE>::new();
+        for _ in 0..(DEFAULT_BUF_SIZE + 1) {
             buf.write(b"a");
         }
         assert_eq!(buf.read_pos, 0);
@@ -105,9 +105,12 @@ mod tests {
 
     #[test]
     fn too_large_write() {
-        let mut buf = Buffer::new();
-        let data: String = std::iter::once("abc").cycle().take(BUF_SIZE).collect();
+        let mut buf = Buffer::<DEFAULT_BUF_SIZE>::new();
+        let data: String = std::iter::once("abc")
+            .cycle()
+            .take(DEFAULT_BUF_SIZE)
+            .collect();
         buf.write(data.as_bytes());
-        assert_eq!(buf.data, data.as_bytes()[(data.len() - BUF_SIZE)..])
+        assert_eq!(buf.data, data.as_bytes()[(data.len() - DEFAULT_BUF_SIZE)..])
     }
 }
