@@ -3,6 +3,7 @@ mod common;
 use common::{SerialIOPlane, SerialInterface};
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use x328_proto::node::Node;
 use x328_proto::{addr, NodeState, Parameter, Value};
 
 #[test]
@@ -12,17 +13,17 @@ fn node_main_loop() {
     let mut serial = SerialIOPlane::new(&serial_sim);
     let mut registers: HashMap<Parameter, Value> = HashMap::new();
 
-    let mut node = NodeState::new(addr(10));
+    let mut node = Node::new(addr(10));
 
     'main: loop {
-        node = match node {
+        match node.state() {
             NodeState::ReceiveData(recv) => {
                 let mut buf = [0; 1];
                 if let Ok(len) = serial.read(&mut buf) {
                     if len == 0 {
                         break 'main;
                     }
-                    recv.receive_data(&buf[..len])
+                    recv.receive_data(&buf[..len]);
                 } else {
                     break 'main;
                 }
@@ -30,24 +31,24 @@ fn node_main_loop() {
 
             NodeState::SendData(mut send) => {
                 serial.write_all(send.get_data()).unwrap();
-                send.data_sent()
+                send.data_sent();
             }
 
             NodeState::ReadParameter(read_command) => {
                 if read_command.parameter() == 3 {
-                    read_command.send_invalid_parameter()
+                    read_command.send_invalid_parameter();
                 } else {
-                    read_command.send_reply_ok(4u16.into())
+                    read_command.send_reply_ok(4u16.into());
                 }
             }
 
             NodeState::WriteParameter(write_command) => {
                 let param = write_command.parameter();
                 if param == 3 {
-                    write_command.write_error()
+                    write_command.write_error();
                 } else {
                     registers.insert(param, write_command.value());
-                    write_command.write_ok()
+                    write_command.write_ok();
                 }
             }
         };

@@ -1,16 +1,16 @@
-mod common;
-
 use std::io::{Read, Write};
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::SeqCst;
 use std::thread;
 use std::time::Duration;
 
+use common::{BusInterface, RS422Bus};
 use x328_proto::master;
 use x328_proto::master::io::Master;
+use x328_proto::node::Node;
 use x328_proto::{addr, NodeState};
 
-use common::{BusInterface, RS422Bus};
+mod common;
 
 fn master_main_loop(io: BusInterface) -> Result<(), master::io::Error> {
     let mut master = Master::new(io);
@@ -29,20 +29,20 @@ fn master_main_loop(io: BusInterface) -> Result<(), master::io::Error> {
 }
 
 fn node_main_loop(mut serial: BusInterface) {
-    let mut node = NodeState::new(addr(5));
+    let mut node = Node::new(addr(5));
     'main: loop {
         if SHUTDOWN.load(SeqCst) {
             break 'main;
         };
 
-        node = match node {
+        match node.state() {
             NodeState::ReceiveData(recv) => {
                 let mut buf = [0; 1];
                 if let Ok(len) = serial.read(&mut buf) {
                     if len == 0 {
                         break 'main;
                     }
-                    recv.receive_data(&buf[..len])
+                    recv.receive_data(&buf[..len]);
                 } else {
                     break 'main;
                 }
@@ -50,18 +50,20 @@ fn node_main_loop(mut serial: BusInterface) {
 
             NodeState::SendData(mut send) => {
                 serial.write_all(send.get_data()).unwrap();
-                send.data_sent()
+                send.data_sent();
             }
 
             NodeState::ReadParameter(read_command) => {
                 if read_command.parameter() == 3 {
-                    read_command.send_invalid_parameter()
+                    read_command.send_invalid_parameter();
                 } else {
-                    read_command.send_reply_ok(4u16.into())
+                    read_command.send_reply_ok(4u16.into());
                 }
             }
 
-            NodeState::WriteParameter(write_command) => write_command.write_ok(),
+            NodeState::WriteParameter(write_command) => {
+                write_command.write_ok();
+            }
         };
     }
 }

@@ -1,6 +1,4 @@
-//! See [`NodeState`] for more details.
-
-use arrayvec::ArrayVec;
+//! An implementation of the "node" half of the X3.28 protocol. See [`Node`] for more details.
 
 use crate::ascii::*;
 use crate::bcc;
@@ -10,33 +8,33 @@ use crate::types::{Address, Parameter, Value};
 
 /// Bus node (listener/server) part of the X3.28 protocol
 ///
-/// This enum represents the different states of the protocol.
-///
-/// Create a new protocol instance with `NodeState::new(address)`.
+/// Create a new protocol instance with `Node::new(address)`. The current protocol state can be
+/// retrieved by calling `state()`. The [`NodeState`] enum returned contains structs that should
+/// be acted upon in order to advance the protocol state machine.
 ///
 /// # Example
 ///
 /// ```
-/// use x328_proto::NodeState;
+/// use x328_proto::node::{Node, NodeState};
 /// # use std::io::{Read, Write, Cursor};
 /// # fn connect_serial_interface() -> Result<Cursor<Vec<u8>>,  &'static str>
 /// # { Ok(Cursor::new(Vec::new())) }
 /// #
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// use x328_proto::{addr, Value};
-/// let mut node = NodeState::new(addr(10)); // new protocol instance with address 10
+/// let mut node = Node::new(addr(10)); // new protocol instance with address 10
 /// let mut serial = connect_serial_interface()?;
 ///
 /// 'main: loop {
 ///        # break // this snippet is only for show
-///        node = match node {
+///        match node.state() {
 ///            NodeState::ReceiveData(recv) => {
 ///                let mut buf = [0; 1];
 ///                if let Ok(len) = serial.read(&mut buf) {
 ///                    if len == 0 {
 ///                        break 'main;
 ///                    }
-///                    recv.receive_data(&buf[..len])
+///                    recv.receive_data(&buf[..len]);
 ///                } else {
 ///                    break 'main;
 ///                }
@@ -44,23 +42,23 @@ use crate::types::{Address, Parameter, Value};
 ///
 ///            NodeState::SendData(mut send) => {
 ///                serial.write_all(send.get_data()).unwrap();
-///                send.data_sent()
+///                send.data_sent();
 ///            }
 ///
 ///            NodeState::ReadParameter(read_command) => {
 ///                if read_command.parameter() == 3 {
-///                    read_command.send_invalid_parameter()
+///                    read_command.send_invalid_parameter();
 ///                } else {
-///                    read_command.send_reply_ok(4u16.into())
+///                    read_command.send_reply_ok(4u16.into());
 ///                }
 ///            }
 ///
 ///            NodeState::WriteParameter(write_command) => {
 ///                let param = write_command.parameter();
 ///                if param == 3 {
-///                    write_command.write_error()
+///                    write_command.write_error();
 ///                } else {
-///                    write_command.write_ok()
+///                    write_command.write_ok();
 ///                }
 ///            }
 ///        };
@@ -68,126 +66,149 @@ use crate::types::{Address, Parameter, Value};
 /// # Ok(()) }
 ///  ```
 #[derive(Debug)]
-pub enum NodeState {
-    /// More data needs to be received from the bus. Use receive_data() on the inner struct.
-    ReceiveData(ReceiveData),
+pub struct Node {
+    state: InternalState,
+    address: Address,
+    read_again_param: Option<(Address, Parameter)>,
+    buffer: Buffer,
+}
+
+/// The current protocol state, as seen by this node.
+pub enum NodeState<'node> {
+    /// More data needs to be received from the bus.
+    ReceiveData(ReceiveData<'node>),
     /// Data is waiting to be transmitted.
-    SendData(SendData),
-    /// A parameter read request from the bus master.
-    ReadParameter(ReadParam),
-    /// A parameter write request from the bus master.
-    WriteParameter(WriteParam),
+    SendData(SendData<'node>),
+    /// A parameter read request.
+    ReadParameter(ReadParam<'node>),
+    /// A parameter write request.
+    WriteParameter(WriteParam<'node>),
 }
 
-impl NodeState {
-    /// Create a new protocol instance, accepting commands for the given address.
-    /// Returns an error if the given adress is invalid.
-    /// # Example
-    ///
-    /// ```
-    /// use x328_proto::{addr, NodeState};
-    /// let mut node: NodeState = NodeState::new(addr(10)); // new protocol instance with address 10
-    /// ```
-    pub fn new(address: Address) -> Self {
-        ReceiveData::new(address).into()
-    }
-
-    /// Do not send any reply to the master. Transition to the idle `ReceiveData` state instead.
-    /// You really shouldn't do this, since this will leave the master waiting until it times out.
-    pub fn no_reply(self) -> Self {
-        match self {
-            Self::ReceiveData(ReceiveData { state, .. })
-            | Self::SendData(SendData { state, .. })
-            | Self::ReadParameter(ReadParam { state, .. })
-            | Self::WriteParameter(WriteParam { state, .. }) => ReceiveData::from_state(state),
-        }
-    }
-}
-
-impl From<ReceiveData> for NodeState {
-    fn from(x: ReceiveData) -> Self {
+impl<'a> From<ReceiveData<'a>> for NodeState<'a> {
+    fn from(x: ReceiveData<'a>) -> Self {
         Self::ReceiveData(x)
     }
 }
 
-impl From<SendData> for NodeState {
-    fn from(x: SendData) -> Self {
+impl<'a> From<SendData<'a>> for NodeState<'a> {
+    fn from(x: SendData<'a>) -> Self {
         Self::SendData(x)
     }
 }
 
-impl From<ReadParam> for NodeState {
-    fn from(x: ReadParam) -> Self {
-        Self::ReadParameter(x)
-    }
-}
-
-impl From<WriteParam> for NodeState {
-    fn from(x: WriteParam) -> Self {
+impl<'a> From<WriteParam<'a>> for NodeState<'a> {
+    fn from(x: WriteParam<'a>) -> Self {
         Self::WriteParameter(x)
     }
 }
-
-type CommonState = CommonStateStruct;
-
-#[derive(Debug)]
-struct CommonStateStruct {
-    address: Address,
-    read_again_param: Option<(Address, Parameter)>,
+impl<'a> From<ReadParam<'a>> for NodeState<'a> {
+    fn from(x: ReadParam<'a>) -> Self {
+        Self::ReadParameter(x)
+    }
+}
+#[derive(Debug, Copy, Clone, PartialEq)]
+enum InternalState {
+    Recv,
+    Send,
+    Read {
+        address: Address,
+        parameter: Parameter,
+    },
+    Write {
+        address: Address,
+        parameter: Parameter,
+        value: Value,
+    },
 }
 
-/// Struct with methods for the "receive data from bus" state.
-#[derive(Debug)]
-pub struct ReceiveData {
-    state: CommonState,
-    input_buffer: Buffer,
-}
-
-impl ReceiveData {
-    /// Create a new bus node instance in the "receive" state without the `NodeState` wrapper.
+impl Node {
+    /// Create a new protocol instance, accepting commands for the given address.
+    /// # Example
+    ///
+    /// ```
+    /// use x328_proto::{addr, node::Node};
+    /// let mut node = Node::new(addr(10)); // new protocol instance with address 10
+    /// ```
     pub fn new(address: Address) -> Self {
         Self {
-            state: CommonStateStruct {
-                address,
-                read_again_param: None,
-            },
-            input_buffer: Buffer::new(),
+            state: InternalState::Recv,
+            address,
+            read_again_param: None,
+            buffer: Buffer::new(),
         }
     }
 
-    fn from_state(state: CommonState) -> NodeState {
-        Self {
-            state,
-            input_buffer: Buffer::new(),
+    /// Returns the current protocol state. Act on the inner structs in order to advance the
+    /// protocol state machine.
+    pub fn state(&mut self) -> NodeState<'_> {
+        match self.state {
+            InternalState::Recv => ReceiveData::from_state(self).into(),
+            InternalState::Send => SendData::from_state(self).into(),
+            InternalState::Read { address, parameter } => {
+                ReadParam::from_state(self, address, parameter).into()
+            }
+            InternalState::Write {
+                address,
+                parameter,
+                value,
+            } => WriteParam::from_state(self, address, parameter, value).into(),
         }
-        .into()
+    }
+
+    fn set_state(&mut self, state: InternalState) {
+        self.state = state;
+    }
+
+    /// Do not send any reply to the bus controller. Transition to the idle `ReceiveData` state instead.
+    /// You should avoid this, since this will leave the controller waiting until it times out.
+    pub fn no_reply(&mut self) -> ReceiveData {
+        ReceiveData::from_state(self)
+    }
+}
+
+/// "Receive data from bus" state.
+#[derive(Debug)]
+pub struct ReceiveData<'node> {
+    node: &'node mut Node,
+}
+
+impl<'node> ReceiveData<'node> {
+    fn from_state(node: &'node mut Node) -> Self {
+        if node.state != InternalState::Recv {
+            node.buffer.clear();
+        }
+        node.set_state(InternalState::Recv);
+        Self { node }
     }
 
     /// Feed data into the internal buffer, and try to parse the buffer afterwards.
     ///
     /// A state transition will occur if a complete command has been received,
     /// or if a protocol error requires a response to be sent.
-    pub fn receive_data(mut self, data: &[u8]) -> NodeState {
-        self.input_buffer.write(data);
+    pub fn receive_data(self, data: &[u8]) -> NodeState<'node> {
+        self.node.buffer.write(data);
         self.parse_buffer()
     }
 
-    fn parse_buffer(mut self) -> NodeState {
+    fn parse_buffer(self) -> NodeState<'node> {
         use CommandToken::{
             InvalidPayload, ReadAgain, ReadNext, ReadParameter, ReadPrevious, WriteParameter,
         };
 
+        let buffer = &mut self.node.buffer;
+
         let (token, read_again_param) = loop {
-            match parse_command(self.input_buffer.as_ref()) {
+            match parse_command(buffer.as_ref()) {
                 (0, _) => return self.need_data(),
                 (consumed, token) => {
-                    self.input_buffer.consume(consumed);
+                    buffer.consume(consumed);
                     // Take the read again parameter from our state. It would be invalid
                     // to use it for later tokens, that's why it's extracted in the loop.
-                    let read_again_param = self.state.read_again_param.take();
+                    let read_again_param = self.node.read_again_param.take();
 
                     // We're done parsing when the buffer is empty
-                    if self.input_buffer.len() == 0 {
+                    if buffer.len() == 0 {
                         break (token, read_again_param);
                     }
                 }
@@ -196,126 +217,130 @@ impl ReceiveData {
 
         match token {
             ReadParameter(address, parameter) if self.for_us(address) => {
-                ReadParam::from_state(self.state, address, parameter)
+                ReadParam::from_state(self.node, address, parameter).into()
             }
             WriteParameter(address, parameter, value) if self.for_us(address) => {
-                WriteParam::from_state(self.state, address, parameter, value)
+                WriteParam::from_state(self.node, address, parameter, value).into()
             }
             ReadAgain | ReadNext | ReadPrevious if read_again_param.is_some() => {
                 let (addr, last_param) = read_again_param.unwrap();
                 match match token {
-                    CommandToken::ReadPrevious => last_param.prev(),
-                    CommandToken::ReadNext => last_param.next(),
+                    ReadPrevious => last_param.prev(),
+                    ReadNext => last_param.next(),
                     _ => Some(last_param),
                 } {
-                    Some(param) => ReadParam::from_state(self.state, addr, param),
-                    None => SendData::from_byte(self.state, EOT),
+                    Some(param) => ReadParam::from_state(self.node, addr, param).into(),
+                    None => SendData::from_byte(self.node, EOT).into(),
                 }
             }
-            InvalidPayload(address) if address == self.state.address => self.send_nak(),
+            InvalidPayload(address) if address == self.node.address => self.send_nak(),
             _ => self.need_data(), // This matches NeedData, and read/write to other addresses
         }
     }
 
-    fn need_data(self) -> NodeState {
+    fn send_byte(self, byte: u8) -> NodeState<'node> {
+        SendData::from_byte(self.node, byte).into()
+    }
+
+    fn need_data(self) -> NodeState<'node> {
         self.into()
     }
 
-    fn send_nak(self) -> NodeState {
-        SendData::from_byte(self.state, NAK)
+    fn send_nak(self) -> NodeState<'node> {
+        self.send_byte(NAK)
     }
 
     fn for_us(&self, address: Address) -> bool {
-        self.state.address == address || self.state.address == 0
+        self.node.address == address || self.node.address == 0
     }
 }
 
-// length: STX<param (4)><value (6)>ETX<bcc> == 13
-type SendDataStore = ArrayVec<u8, 13>;
-
-/// Struct with methods for the "transmit data on bus" state.
+/// "Transmit data on the bus" state.
 ///
 /// Call [`get_data()`](Self::get_data()) to get a reference to the data to be transmitted,
 /// and then call [`data_sent()`](Self::data_sent()) when the data has been successfully transmitted.
 #[derive(Debug)]
-pub struct SendData {
-    state: CommonState,
-    data: SendDataStore,
+pub struct SendData<'node> {
+    node: &'node mut Node,
 }
 
-impl SendData {
-    fn from_state(state: CommonState, data: SendDataStore) -> NodeState {
-        Self { state, data }.into()
+impl<'node> SendData<'node> {
+    /// SendData::from_state expects that the node buffer already has been prepared
+    fn from_state(node: &'node mut Node) -> Self {
+        node.set_state(InternalState::Send);
+        Self { node }
     }
 
-    fn from_byte(state: CommonState, byte: u8) -> NodeState {
-        let mut data = ArrayVec::new();
-        data.push(byte);
-        Self { state, data }.into()
+    fn from_byte(node: &'node mut Node, byte: u8) -> Self {
+        let buf = &mut node.buffer;
+        buf.clear();
+        buf.push(byte);
+        Self::from_state(node)
     }
 
     /// Returns the data to be sent on the bus.
     pub fn get_data(&mut self) -> &[u8] {
-        self.data.as_ref()
+        self.node.buffer.as_ref()
     }
 
-    /// Signals that the data was sent, and it's time to go back to the
-    /// `ReadData` state.
-    pub fn data_sent(self) -> NodeState {
-        ReceiveData::from_state(self.state)
+    /// Confirm that the data was sent, and it's time to go back to the
+    /// `ReceiveData` state.
+    pub fn data_sent(self) -> ReceiveData<'node> {
+        ReceiveData::from_state(self.node)
     }
 }
 
-/// Struct representing the "read command received" state.
+/// The "read command received" state. The bus controller expects a reply with the current
+/// value of the specified parameter.
 #[derive(Debug)]
-pub struct ReadParam {
-    state: CommonState,
+pub struct ReadParam<'node> {
+    node: &'node mut Node,
     address: Address,
     parameter: Parameter,
 }
 
-impl ReadParam {
-    fn from_state(state: CommonState, address: Address, parameter: Parameter) -> NodeState {
+impl<'node> ReadParam<'node> {
+    fn from_state(node: &'node mut Node, address: Address, parameter: Parameter) -> Self {
+        node.set_state(InternalState::Read { address, parameter });
         Self {
-            state,
+            node,
             address,
             parameter,
         }
-        .into()
     }
 
     /// Send a response to the master with the value of
     /// the parameter in the read request.
-    pub fn send_reply_ok(mut self, value: Value) -> NodeState {
-        self.state.read_again_param = Some((self.address, self.parameter));
+    pub fn send_reply_ok(mut self, value: Value) -> SendData<'node> {
+        self.node.read_again_param = Some((self.address, self.parameter));
 
-        let mut data = SendDataStore::new();
+        let data = &mut self.node.buffer;
+        data.clear();
+
         data.push(STX);
-        data.try_extend_from_slice(&self.parameter.to_bytes())
-            .expect("BUG: Send buffer too small.");
-        data.try_extend_from_slice(&value.to_bytes())
-            .expect("BUG: Send buffer too small.");
+        data.write(&self.parameter.to_bytes());
+        data.write(&value.to_bytes());
         data.push(ETX);
-        data.push(bcc(&data[1..]));
+        data.push(bcc(&data.as_ref()[1..]));
 
-        SendData::from_state(self.state, data)
+        SendData::from_state(self.node)
     }
 
     /// Inform the master that the parameter in the request is invalid.
-    pub fn send_invalid_parameter(self) -> NodeState {
-        SendData::from_byte(self.state, EOT)
+    pub fn send_invalid_parameter(self) -> SendData<'node> {
+        SendData::from_byte(self.node, EOT)
     }
 
     /// Inform the bus master that the read request failed
     /// for some reason other than invalid parameter number.
-    pub fn send_read_failed(self) -> NodeState {
-        SendData::from_byte(self.state, NAK)
+    pub fn send_read_failed(self) -> SendData<'node> {
+        SendData::from_byte(self.node, NAK)
     }
 
     /// Do not send any reply to the master. Transition to the idle `ReceiveData` state instead.
     /// You really shouldn't do this, since this will leave the master waiting until it times out.
-    pub fn no_reply(self) -> NodeState {
-        ReceiveData::from_state(self.state)
+    pub fn no_reply(self) -> ReceiveData<'node> {
+        ReceiveData::from_state(self.node)
     }
 
     /// Get the address the request was sent to.
@@ -329,46 +354,51 @@ impl ReadParam {
     }
 }
 
-/// Struct representing the "write command received" state.
+/// "Write command received" state. The bus controller wants to change the value
+/// of the specified parameter.
 #[derive(Debug)]
-pub struct WriteParam {
-    state: CommonState,
+pub struct WriteParam<'node> {
+    node: &'node mut Node,
     address: Address,
     parameter: Parameter,
     value: Value,
 }
 
-impl WriteParam {
+impl<'node> WriteParam<'node> {
     fn from_state(
-        state: CommonState,
+        node: &'node mut Node,
         address: Address,
         parameter: Parameter,
         value: Value,
-    ) -> NodeState {
+    ) -> Self {
+        node.set_state(InternalState::Write {
+            address,
+            parameter,
+            value,
+        });
         Self {
-            state,
+            node,
             address,
             parameter,
             value,
         }
-        .into()
     }
 
-    /// Inform the master that the parameter value was successfully updated.
-    pub fn write_ok(self) -> NodeState {
-        SendData::from_byte(self.state, ACK)
+    /// Inform the bus controller that the parameter value was successfully updated.
+    pub fn write_ok(self) -> SendData<'node> {
+        SendData::from_byte(self.node, ACK)
     }
 
     /// The parameter or value is invalid, or something else is preventing
     /// us from setting the parameter to the given value.
-    pub fn write_error(self) -> NodeState {
-        SendData::from_byte(self.state, NAK)
+    pub fn write_error(self) -> SendData<'node> {
+        SendData::from_byte(self.node, NAK)
     }
 
-    /// Do not send any reply to the master. Transition to the idle `ReceiveData` state instead.
-    /// You really shouldn't do this, since this will leave the master waiting until it times out.
-    pub fn no_reply(self) -> NodeState {
-        ReceiveData::from_state(self.state)
+    /// Do not send any reply to the bus controller. Transition to the idle `ReceiveData` state instead.
+    /// You should avoid this, since this will leave the controller waiting until it times out.
+    pub fn no_reply(self) -> ReceiveData<'node> {
+        ReceiveData::from_state(self.node)
     }
 
     /// The address the write request was sent to.
