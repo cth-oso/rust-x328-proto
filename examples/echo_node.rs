@@ -21,9 +21,8 @@ fn node_main_loop() -> Result<(), Box<dyn Error>> {
                 recv.receive_data(&data_in);
             }
 
-            NodeState::SendData(mut send) => {
-                io::stdout().write_all(send.get_data())?;
-                send.data_sent();
+            NodeState::SendData(send) => {
+                io::stdout().write_all(send.send_data())?;
             }
 
             NodeState::ReadParameter(read_command) => {

@@ -29,9 +29,8 @@ fn node_main_loop() {
                 }
             }
 
-            NodeState::SendData(mut send) => {
-                serial.write_all(send.get_data()).unwrap();
-                send.data_sent();
+            NodeState::SendData(send) => {
+                serial.write_all(send.send_data()).unwrap();
             }
 
             NodeState::ReadParameter(read_command) => {

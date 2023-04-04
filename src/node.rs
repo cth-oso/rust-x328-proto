@@ -41,8 +41,7 @@ use crate::types::{Address, Parameter, Value};
 ///            }
 ///
 ///            NodeState::SendData(mut send) => {
-///                serial.write_all(send.get_data()).unwrap();
-///                send.data_sent();
+///                serial.write_all(send.send_data()).unwrap();
 ///            }
 ///
 ///            NodeState::ReadParameter(read_command) => {
@@ -278,15 +277,10 @@ impl<'node> SendData<'node> {
         Self::from_state(node)
     }
 
-    /// Returns the data to be sent on the bus.
-    pub fn get_data(&mut self) -> &[u8] {
-        self.node.buffer.as_ref()
-    }
-
-    /// Confirm that the data was sent, and it's time to go back to the
-    /// `ReceiveData` state.
-    pub fn data_sent(self) -> ReceiveData<'node> {
-        ReceiveData::from_state(self.node)
+    /// Returns the data to be sent on the bus, and changes the state to "receive data".
+    pub fn send_data(self) -> &'node [u8] {
+        self.node.set_state(InternalState::Recv);
+        self.node.buffer.get_ref_and_clear()
     }
 }
 

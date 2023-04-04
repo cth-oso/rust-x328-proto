@@ -62,6 +62,12 @@ impl<const BUF_SIZE: usize> Buffer<BUF_SIZE> {
         self.data.clear();
         self.read_pos = 0;
     }
+
+    pub fn get_ref_and_clear(&mut self) -> &[u8] {
+        let pos = self.read_pos;
+        self.consume(self.len());
+        &self.data[pos..]
+    }
 }
 
 impl<const BUF_SIZE: usize> AsRef<[u8]> for Buffer<BUF_SIZE> {
