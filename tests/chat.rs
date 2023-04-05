@@ -7,7 +7,7 @@ use std::time::Duration;
 use common::{BusInterface, RS422Bus};
 use x328_proto::master;
 use x328_proto::master::io::Master;
-use x328_proto::node::Node;
+use x328_proto::node::{Node, ParamRequest};
 use x328_proto::{addr, NodeState};
 
 mod common;
@@ -52,17 +52,18 @@ fn node_main_loop(mut serial: BusInterface) {
                 serial.write_all(send.send_data()).unwrap();
             }
 
-            NodeState::ReadParameter(read_command) => {
-                if read_command.parameter() == 3 {
-                    read_command.send_invalid_parameter();
-                } else {
-                    read_command.send_reply_ok(4u16.into());
+            NodeState::Command(cmd) => match cmd {
+                ParamRequest::Read(read_command) => {
+                    if read_command.parameter() == 3 {
+                        read_command.send_invalid_parameter();
+                    } else {
+                        read_command.send_reply_ok(4u16.into());
+                    }
                 }
-            }
-
-            NodeState::WriteParameter(write_command) => {
-                write_command.write_ok();
-            }
+                ParamRequest::Write(write_command) => {
+                    write_command.write_ok();
+                }
+            },
         };
     }
 }

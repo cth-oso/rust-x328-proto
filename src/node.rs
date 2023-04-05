@@ -15,7 +15,7 @@ use crate::types::{Address, Parameter, Value};
 /// # Example
 ///
 /// ```
-/// use x328_proto::node::{Node, NodeState};
+/// use x328_proto::node::{Node, NodeState, ParamRequest};
 /// # use std::io::{Read, Write, Cursor};
 /// # fn connect_serial_interface() -> Result<Cursor<Vec<u8>>,  &'static str>
 /// # { Ok(Cursor::new(Vec::new())) }
@@ -44,24 +44,26 @@ use crate::types::{Address, Parameter, Value};
 ///                serial.write_all(send.send_data()).unwrap();
 ///            }
 ///
-///            NodeState::ReadParameter(read_command) => {
-///                if read_command.parameter() == 3 {
-///                    read_command.send_invalid_parameter();
-///                } else {
-///                    read_command.send_reply_ok(4u16.into());
+///            NodeState::Command(cmd) => {
+///            match cmd {
+///                ParamRequest::Read(read_command) => {
+///                    if read_command.parameter() == 3 {
+///                        read_command.send_invalid_parameter();
+///                    } else {
+///                        read_command.send_reply_ok(4u16.into());
+///                    }
+///                }
+///                ParamRequest::Write(write_command) => {
+///                    let param = write_command.parameter();
+///                    if param == 3 {
+///                        write_command.write_error();
+///                    } else {
+///                        write_command.write_ok();
+///                    }
 ///                }
 ///            }
+///        }}};
 ///
-///            NodeState::WriteParameter(write_command) => {
-///                let param = write_command.parameter();
-///                if param == 3 {
-///                    write_command.write_error();
-///                } else {
-///                    write_command.write_ok();
-///                }
-///            }
-///        };
-/// }
 /// # Ok(()) }
 ///  ```
 #[derive(Debug)]
@@ -78,10 +80,17 @@ pub enum NodeState<'node> {
     ReceiveData(ReceiveData<'node>),
     /// Data is waiting to be transmitted.
     SendData(SendData<'node>),
-    /// A parameter read request.
-    ReadParameter(ReadParam<'node>),
-    /// A parameter write request.
-    WriteParameter(WriteParam<'node>),
+    /// A command to this node from the bus controller
+    Command(ParamRequest<'node>),
+}
+
+/// X3.28 parameter read and write requests
+#[derive(Debug)]
+pub enum ParamRequest<'node> {
+    /// Request for the current parameter value
+    Read(ReadParam<'node>),
+    /// Request to change the parameter value
+    Write(WriteParam<'node>),
 }
 
 impl<'a> From<ReceiveData<'a>> for NodeState<'a> {
@@ -98,14 +107,16 @@ impl<'a> From<SendData<'a>> for NodeState<'a> {
 
 impl<'a> From<WriteParam<'a>> for NodeState<'a> {
     fn from(x: WriteParam<'a>) -> Self {
-        Self::WriteParameter(x)
+        Self::Command(ParamRequest::Write(x))
     }
 }
+
 impl<'a> From<ReadParam<'a>> for NodeState<'a> {
     fn from(x: ReadParam<'a>) -> Self {
-        Self::ReadParameter(x)
+        Self::Command(ParamRequest::Read(x))
     }
 }
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 enum InternalState {
     Recv,
