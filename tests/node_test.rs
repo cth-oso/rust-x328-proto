@@ -14,16 +14,17 @@ fn node_main_loop() {
     let mut registers: HashMap<Parameter, Value> = HashMap::new();
 
     let mut node = Node::new(addr(10));
+    let mut token = node.reset();
 
     'main: loop {
-        match node.state() {
+        match node.state(token) {
             NodeState::ReceiveData(recv) => {
                 let mut buf = [0; 1];
                 if let Ok(len) = serial.read(&mut buf) {
                     if len == 0 {
                         break 'main;
                     }
-                    recv.receive_data(&buf[..len]);
+                    token = recv.receive_data(&buf[..len]);
                 } else {
                     break 'main;
                 }
@@ -31,24 +32,25 @@ fn node_main_loop() {
 
             NodeState::SendData(send) => {
                 serial.write_all(send.send_data()).unwrap();
+                token = send.data_sent();
             }
 
             NodeState::ReadParameter(read_command) => {
-                if read_command.parameter() == 3 {
-                    read_command.send_invalid_parameter();
+                token = if read_command.parameter() == 3 {
+                    read_command.send_invalid_parameter()
                 } else {
-                    read_command.send_reply_ok(4u16.into());
+                    read_command.send_reply_ok(4u16.into())
                 }
             }
 
             NodeState::WriteParameter(write_command) => {
                 let param = write_command.parameter();
-                if param == 3 {
-                    write_command.write_error();
+                token = if param == 3 {
+                    write_command.write_error()
                 } else {
                     registers.insert(param, write_command.value());
-                    write_command.write_ok();
-                }
+                    write_command.write_ok()
+                };
             }
         };
     }

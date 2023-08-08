@@ -30,19 +30,21 @@ fn master_main_loop(io: BusInterface) -> Result<(), master::io::Error> {
 
 fn node_main_loop(mut serial: BusInterface) {
     let mut node = Node::new(addr(5));
+    let mut token = node.reset();
+
     'main: loop {
         if SHUTDOWN.load(SeqCst) {
             break 'main;
         };
 
-        match node.state() {
+        match node.state(token) {
             NodeState::ReceiveData(recv) => {
                 let mut buf = [0; 1];
                 if let Ok(len) = serial.read(&mut buf) {
                     if len == 0 {
                         break 'main;
                     }
-                    recv.receive_data(&buf[..len]);
+                    token = recv.receive_data(&buf[..len]);
                 } else {
                     break 'main;
                 }
@@ -50,18 +52,19 @@ fn node_main_loop(mut serial: BusInterface) {
 
             NodeState::SendData(send) => {
                 serial.write_all(send.send_data()).unwrap();
+                token = send.data_sent();
             }
 
             NodeState::ReadParameter(read_command) => {
-                if read_command.parameter() == 3 {
-                    read_command.send_invalid_parameter();
+                token = if read_command.parameter() == 3 {
+                    read_command.send_invalid_parameter()
                 } else {
-                    read_command.send_reply_ok(4u16.into());
+                    read_command.send_reply_ok(4u16.into())
                 }
             }
 
             NodeState::WriteParameter(write_command) => {
-                write_command.write_ok();
+                token = write_command.write_ok();
             }
         };
     }

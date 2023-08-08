@@ -5,6 +5,7 @@ use crate::bcc;
 use crate::buffer::Buffer;
 use crate::nom_parser::node::{parse_command, CommandToken};
 use crate::types::{Address, Parameter, Value};
+use core::marker::PhantomData;
 
 /// Bus node (listener/server) part of the X3.28 protocol
 ///
@@ -24,17 +25,18 @@ use crate::types::{Address, Parameter, Value};
 /// use x328_proto::{addr, Value};
 /// let mut node = Node::new(addr(10)); // new protocol instance with address 10
 /// let mut serial = connect_serial_interface()?;
+/// let mut token = node.reset();
 ///
 /// 'main: loop {
 ///        # break // this snippet is only for show
-///        match node.state() {
+///        match node.state(token) {
 ///            NodeState::ReceiveData(recv) => {
 ///                let mut buf = [0; 1];
 ///                if let Ok(len) = serial.read(&mut buf) {
 ///                    if len == 0 {
 ///                        break 'main;
 ///                    }
-///                    recv.receive_data(&buf[..len]);
+///                    token = recv.receive_data(&buf[..len]);
 ///                } else {
 ///                    break 'main;
 ///                }
@@ -83,6 +85,9 @@ pub enum NodeState<'node> {
     /// A parameter write request.
     WriteParameter(WriteParam<'node>),
 }
+
+/// ZST used for making sure that the protocol state always is advancing.
+pub struct StateToken(PhantomData<()>);
 
 impl<'a> From<ReceiveData<'a>> for NodeState<'a> {
     fn from(x: ReceiveData<'a>) -> Self {
@@ -138,9 +143,16 @@ impl Node {
         }
     }
 
+    /// Obtain a new StateToken by resetting the protocol state to "receive data".
+    pub fn reset(&mut self) -> StateToken {
+        ReceiveData::from_state(self);
+        StateToken(PhantomData)
+    }
+
     /// Returns the current protocol state. Act on the inner structs in order to advance the
     /// protocol state machine.
-    pub fn state(&mut self) -> NodeState<'_> {
+    pub fn state(&mut self, token: StateToken) -> NodeState<'_> {
+        let _ = token;
         match self.state {
             InternalState::Recv => ReceiveData::from_state(self).into(),
             InternalState::Send => SendData::from_state(self).into(),
@@ -161,8 +173,8 @@ impl Node {
 
     /// Do not send any reply to the bus controller. Transition to the idle `ReceiveData` state instead.
     /// You should avoid this, since this will leave the controller waiting until it times out.
-    pub fn no_reply(&mut self) -> ReceiveData {
-        ReceiveData::from_state(self)
+    pub fn no_reply(&mut self, _token: StateToken) -> StateToken {
+        self.reset()
     }
 }
 
@@ -185,9 +197,10 @@ impl<'node> ReceiveData<'node> {
     ///
     /// A state transition will occur if a complete command has been received,
     /// or if a protocol error requires a response to be sent.
-    pub fn receive_data(self, data: &[u8]) -> NodeState<'node> {
+    pub fn receive_data(self, data: &[u8]) -> StateToken {
         self.node.buffer.write(data);
-        self.parse_buffer()
+        self.parse_buffer();
+        StateToken(PhantomData)
     }
 
     fn parse_buffer(self) -> NodeState<'node> {
@@ -278,9 +291,15 @@ impl<'node> SendData<'node> {
     }
 
     /// Returns the data to be sent on the bus, and changes the state to "receive data".
-    pub fn send_data(self) -> &'node [u8] {
+    pub fn send_data(&self) -> &[u8] {
+        self.node.buffer.as_ref()
+    }
+
+    /// Indicate that the response data has been transmitted successfully, and move to the "receive data" state.
+    pub fn data_sent(self) -> StateToken {
         self.node.set_state(InternalState::Recv);
-        self.node.buffer.get_ref_and_clear()
+        self.node.buffer.get_ref_and_clear();
+        StateToken(PhantomData)
     }
 }
 
@@ -305,7 +324,7 @@ impl<'node> ReadParam<'node> {
 
     /// Send a response to the master with the value of
     /// the parameter in the read request.
-    pub fn send_reply_ok(mut self, value: Value) -> SendData<'node> {
+    pub fn send_reply_ok(self, value: Value) -> StateToken {
         self.node.read_again_param = Some((self.address, self.parameter));
 
         let data = &mut self.node.buffer;
@@ -317,24 +336,28 @@ impl<'node> ReadParam<'node> {
         data.push(ETX);
         data.push(bcc(&data.as_ref()[1..]));
 
-        SendData::from_state(self.node)
+        SendData::from_state(self.node);
+        StateToken(PhantomData)
     }
 
     /// Inform the master that the parameter in the request is invalid.
-    pub fn send_invalid_parameter(self) -> SendData<'node> {
-        SendData::from_byte(self.node, EOT)
+    pub fn send_invalid_parameter(self) -> StateToken {
+        SendData::from_byte(self.node, EOT);
+        StateToken(PhantomData)
     }
 
     /// Inform the bus master that the read request failed
     /// for some reason other than invalid parameter number.
-    pub fn send_read_failed(self) -> SendData<'node> {
-        SendData::from_byte(self.node, NAK)
+    pub fn send_read_failed(self) -> StateToken {
+        SendData::from_byte(self.node, NAK);
+        StateToken(PhantomData)
     }
 
     /// Do not send any reply to the master. Transition to the idle `ReceiveData` state instead.
     /// You really shouldn't do this, since this will leave the master waiting until it times out.
-    pub fn no_reply(self) -> ReceiveData<'node> {
-        ReceiveData::from_state(self.node)
+    pub fn no_reply(self) -> StateToken {
+        ReceiveData::from_state(self.node);
+        StateToken(PhantomData)
     }
 
     /// Get the address the request was sent to.
@@ -379,20 +402,23 @@ impl<'node> WriteParam<'node> {
     }
 
     /// Inform the bus controller that the parameter value was successfully updated.
-    pub fn write_ok(self) -> SendData<'node> {
-        SendData::from_byte(self.node, ACK)
+    pub fn write_ok(self) -> StateToken {
+        SendData::from_byte(self.node, ACK);
+        StateToken(PhantomData)
     }
 
     /// The parameter or value is invalid, or something else is preventing
     /// us from setting the parameter to the given value.
-    pub fn write_error(self) -> SendData<'node> {
-        SendData::from_byte(self.node, NAK)
+    pub fn write_error(self) -> StateToken {
+        SendData::from_byte(self.node, NAK);
+        StateToken(PhantomData)
     }
 
     /// Do not send any reply to the bus controller. Transition to the idle `ReceiveData` state instead.
     /// You should avoid this, since this will leave the controller waiting until it times out.
-    pub fn no_reply(self) -> ReceiveData<'node> {
-        ReceiveData::from_state(self.node)
+    pub fn no_reply(self) -> StateToken {
+        ReceiveData::from_state(self.node);
+        StateToken(PhantomData)
     }
 
     /// The address the write request was sent to.
