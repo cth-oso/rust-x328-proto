@@ -19,6 +19,7 @@ pub use types::{
 
 mod buffer;
 mod nom_parser;
+pub mod scanner;
 pub mod types;
 
 mod ascii {

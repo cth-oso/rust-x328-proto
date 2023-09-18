@@ -256,7 +256,7 @@ impl ReceiveData for ReadCmd<'_> {
 }
 
 /// Error type for the X3.28 bus controller
-#[derive(Debug, Snafu)]
+#[derive(Debug, Clone, Snafu)]
 pub enum Error {
     /// The node responded `EOT` to a command, indicating that
     /// the sent `Parameter` doesn't exist on the node.

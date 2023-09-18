@@ -1,10 +1,11 @@
-mod common;
-
+use common::bytes::*;
+use common::sync::RS422Bus;
 use x328_proto::master::io;
 use x328_proto::{Address, Parameter};
 
-use common::bytes::*;
-use common::*;
+use crate::common::{SerialIOPlane, SerialInterface};
+
+mod common;
 
 #[test]
 fn master_main_loop() {
