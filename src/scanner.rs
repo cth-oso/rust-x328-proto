@@ -42,6 +42,12 @@ pub enum NodeEvent {
     UnexpectedTransmission,
 }
 
+impl Default for Scanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Scanner {
     /// Create a new scanner instance.
     pub fn new() -> Self {
