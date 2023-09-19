@@ -74,6 +74,13 @@ pub mod node {
         (buf.len() - remaining.len(), token)
     }
 
+    /// This is used in the scanner module in order to not hide bus errors
+    pub fn scan_command(buf: &Buf) -> (usize, CommandToken) {
+        let (tail, tok) = alt((read_again, write_command, read_command, invalid_payload))(buf)
+            .unwrap_or_else(|_| invalid_leading_bytes(buf));
+        (buf.len() - tail.len(), tok)
+    }
+
     fn alt_match(buf: &Buf) -> (&Buf, CommandToken) {
         if let Ok(x) = read_again(buf) {
             return x;
@@ -88,6 +95,14 @@ pub mod node {
         buf.iter()
             .rposition(|c| *c == EOT)
             .map_or(b"", |pos| &buf[pos..])
+    }
+
+    fn invalid_leading_bytes(buf: &Buf) -> (&Buf, CommandToken) {
+        if let Some(pos) = buf.iter().position(|b| *b == EOT) {
+            (&buf[pos..], NeedData)
+        } else {
+            (&[], NeedData)
+        }
     }
 
     fn read_command(buf: &Buf) -> IResult<&Buf, CommandToken> {

@@ -4,13 +4,13 @@ controller and the nodes. Useful for sniffing a X3.28 bus, or transparently spli
 */
 
 use crate::master::{self, Master, SendData};
-use crate::node::Node;
-use crate::{addr, param, value, Address, NodeState, Parameter, Value};
+use crate::nom_parser::node::{scan_command, CommandToken};
+use crate::{addr, param, value, Address, Parameter, Value};
 
 /// Decode data from both the master and node channels, and turn it into X3.28 messages
 pub struct Scanner {
-    node: Node,
     expect: Expect,
+    read_again: Option<(Address, Parameter)>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -45,46 +45,59 @@ pub enum NodeEvent {
 impl Scanner {
     /// Create a new scanner instance.
     pub fn new() -> Self {
-        let node = Node::new(addr(0));
         Self {
-            node,
             expect: Expect::Command,
+            read_again: None,
         }
     }
 
     /// Parse data from the bus controller. The return value is the number of bytes consumed
     /// to generate the returned event. `&data[consumed..]` should be passed in the next call,
     /// together with any newly received data.
+    ///
+    /// Invalid leading data will be consumed, but None will be returned instead of an event.
     pub fn recv_from_ctrl(&mut self, data: &[u8]) -> (usize, Option<ControllerEvent>) {
+        let read_again = self.read_again.take();
+
         if self.expect != Expect::Command {
             self.expect = Expect::Command;
             return (0, Some(ControllerEvent::NodeTimeout));
         }
-        let len = data.len();
-        let mut data = data.iter();
-        let mut tok = self.node.reset();
-        let event = loop {
-            tok = match self.node.state(tok) {
-                NodeState::ReceiveData(recv) => {
-                    let Some(byte) = data.next() else {
-                        return (0, None);
-                    };
-                    recv.receive_data([*byte].as_slice())
+
+        let (consumed, token) = scan_command(data);
+        let event = match token {
+            CommandToken::WriteParameter(a, p, v) => {
+                self.expect = Expect::WriteResponse;
+                Some(ControllerEvent::Write(a, p, v))
+            }
+            CommandToken::ReadParameter(a, p) => {
+                self.expect = Expect::ReadResponse(a, p);
+                self.read_again = Some((a, p));
+                Some(ControllerEvent::Read(a, p))
+            }
+            CommandToken::ReadPrevious | CommandToken::ReadAgain | CommandToken::ReadNext
+                if read_again.is_some() =>
+            {
+                let (ra, rp) = read_again.unwrap();
+                match token {
+                    CommandToken::ReadPrevious => rp.prev(),
+                    CommandToken::ReadAgain => Some(rp),
+                    CommandToken::ReadNext => rp.next(),
+                    _ => unreachable!(),
                 }
-                NodeState::SendData(send) => send.data_sent(), // TODO: automatic error responses won't generate an event
-                NodeState::ReadParameter(read) => {
-                    let (addr, param) = (read.address(), read.parameter());
-                    self.expect = Expect::ReadResponse(addr, param);
-                    break ControllerEvent::Read(addr, param);
-                }
-                NodeState::WriteParameter(write) => {
-                    let (addr, param, value) = (write.address(), write.parameter(), write.value());
-                    self.expect = Expect::WriteResponse;
-                    break ControllerEvent::Write(addr, param, value);
-                }
-            };
+                .map(|p| {
+                    self.expect = Expect::ReadResponse(ra, p);
+                    self.read_again = Some((ra, p));
+                    ControllerEvent::Read(ra, p)
+                })
+            }
+            CommandToken::ReadPrevious | CommandToken::ReadAgain | CommandToken::ReadNext => {
+                None // The controller issued a read again command without a preceding read command
+            }
+            CommandToken::InvalidPayload(_) => None,
+            CommandToken::NeedData => None,
         };
-        (len - data.as_slice().len(), Some(event))
+        return (consumed, event);
     }
 
     /// Parse data from the bus nodes. The return value is the number of bytes consumed
