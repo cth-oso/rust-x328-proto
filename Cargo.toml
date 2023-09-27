@@ -1,6 +1,6 @@
 [package]
 name = "x328-proto"
-version = "0.1.3"
+version = "0.2.0"
 license = "MIT OR Apache-2.0"
 authors = ["Lukas Sandström <lukas.sandstrom@chalmers.se>"]
 edition = "2018"
