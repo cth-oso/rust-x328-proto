@@ -20,7 +20,7 @@ snafu = { version= "0.7.1", default-features=false, features = ["rust_1_46"] }
 
 [dev-dependencies]
 anyhow = "1.0.60"
-env_logger = "0.9.0"
+env_logger = "0.10.0"
 serialport = "4.2.0"
 
 [features]
