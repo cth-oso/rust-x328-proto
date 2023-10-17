@@ -8,6 +8,7 @@ use crate::nom_parser::node::{scan_command, CommandToken};
 use crate::{addr, param, value, Address, Parameter, Value};
 
 /// Decode data from both the master and node channels, and turn it into X3.28 messages
+#[derive(Debug)]
 pub struct Scanner {
     expect: Expect,
     read_again: Option<(Address, Parameter)>,
