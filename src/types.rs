@@ -378,12 +378,6 @@ pub trait IntoValue {
     fn into_value(self) -> Result<Value, Error>;
 }
 
-impl IntoValue for Value {
-    fn into_value(self) -> Result<Value, Error> {
-        Ok(self)
-    }
-}
-
 impl<T> IntoValue for T
 where
     T: TryInto<i32>,
@@ -416,6 +410,12 @@ impl From<i16> for Value {
             ValueFormat::Normal
         };
         Self(val, fmt)
+    }
+}
+
+impl From<Value> for i32 {
+    fn from(value: Value) -> Self {
+        value.0
     }
 }
 
